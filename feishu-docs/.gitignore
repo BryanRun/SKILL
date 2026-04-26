@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+
+# 本地打包产物（git archive 发布包，不提交）
+dist/
