@@ -1,6 +1,6 @@
 # gerrit-pipeline — 使用说明
 
-**版本：v1.1.0**
+**版本：v1.2.0**
 
 gerrit-pipeline 是一个 Claude Code Skill，为车联 AutoLink 团队提供 Gerrit 代码提交评审一站式自动化能力。只需一句指令，即可完成从代码提交、自动评审、Checklist 贴回到飞书群通知的完整流水线，也支持每个步骤独立执行。目标是减少重复操作、统一提交规范、加速 Code Review 闭环。
 
@@ -180,6 +180,7 @@ Claude 会按 Step 1 → 2 → 3 → 4 顺序自动执行全部步骤。
 
 | 版本 | 日期 | 变更内容 |
 |------|------|---------|
+| v1.2.0 | 2026-04-27 | Commit message body 各字段新增 50 字上限约束，校验脚本同步增加最大字数检查 |
 | v1.1.0 | 2026-04-26 | 融合 gerrit-submit 为内置能力，Step 1 不再依赖外部 skill；通知卡片新增提交人字段并 @mention；新增 `feishu.submitter` 配置项 |
 | v1.0.0 | 2026-04-25 | 首次发布。四步流水线（代码提交 → 评审 → Checklist → 飞书通知），支持独立操作，配置化（用户私有 config.json），飞书通知 @mention 审核人 |
 

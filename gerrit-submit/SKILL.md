@@ -37,37 +37,37 @@ description: >-
 ### 2.1 标题格式
 
 ```
-【类型】JIRA-ID：概要描述
+【类型】【JIRA-ID】概要描述
 ```
 
 - **类型**（必选其一）：`bug` / `change` / `feature`
   - `bug`：缺陷修复
   - `change`：需求变更
   - `feature`：新功能开发
-- **JIRA-ID**：JIRA ticket 编号，必须在 JIRA 上真实存在。已知前缀：`CHYT1V` / `BAIC` / `KP31` / `CL` / `T1V` / `D01` / `XINCHI` 等
+- **JIRA-ID**：JIRA ticket 编号，用 `【】` 包裹，必须在 JIRA 上真实存在。已知前缀：`CHYT1V` / `BAIC` / `KP31` / `CL` / `T1V` / `D01` / `XINCHI` 等
 - **概要描述**：简明扼要说明改动内容
 
 **示例**：
 ```
-【bug】CHYT1V-1058：仪表双闪报警灯无提示音
-【feature】CHYT1V-961：Carproperty 新增车辆属性支持
-【change】CHYT1V-200：登录流程调整为异步模式
+【bug】【CHYT1V-1058】仪表双闪报警灯无提示音
+【feature】【CHYT1V-961】Carproperty 新增车辆属性支持
+【change】【CHYT1V-200】登录流程调整为异步模式
 ```
 
 ### 2.2 Body 必填字段
 
 所有字段均为**必填**，Gerrit 门禁会检查前 4 项的最低字数要求。
 
-| 字段 | 最低字数 | 说明 |
-|------|---------|------|
-| 【原因分析】 | 8 字 | 概述故障原因或新需求/变更背景 |
-| 【解决方案】 | 8 字 | 概述改动方案 |
-| 【自测用例】 | 20 字 | 描述自测用例：场景 + 操作步骤 + 期望结果 + 实际结果 |
-| 【自测方法】 | 4 字 | 描述验证方式及次数 |
-| 【影响范围】 | — | 说明本次改动影响的模块或功能范围 |
-| 【代码修改量】 | — | 修改的代码行数（估算即可） |
-| 【提交项目/分支】 | — | 提交的目标项目和分支名 |
-| 【体现版本】 | — | 改动将体现在哪个版本中 |
+| 字段 | 最低字数 | 最高字数 | 说明 |
+|------|---------|---------|------|
+| 【原因分析】 | 8 字 | 50 字 | 概述故障原因或新需求/变更背景，简明扼要 |
+| 【解决方案】 | 8 字 | 50 字 | 概述改动方案，简明扼要 |
+| 【自测用例】 | 20 字 | 50 字 | 场景 + 操作步骤 + 期望结果 + 实际结果，简明扼要 |
+| 【自测方法】 | 4 字 | 50 字 | 验证方式及次数，简明扼要 |
+| 【影响范围】 | — | 50 字 | 受影响的模块或功能范围，简明扼要 |
+| 【代码修改量】 | — | 50 字 | 修改的代码行数（估算即可） |
+| 【提交项目/分支】 | — | 50 字 | 提交的目标项目和分支名 |
+| 【体现版本】 | — | 50 字 | 改动将体现在哪个版本中 |
 
 ### 2.3 Change-Id
 
@@ -78,7 +78,7 @@ description: >-
 ### 2.4 完整 Commit Message 模板
 
 ```
-【{类型}】{JIRA-ID}：{概要描述}
+【{类型}】【{JIRA-ID}】{概要描述}
 
 【原因分析】{至少8字，描述故障原因或需求背景}
 【解决方案】{至少8字，描述改动方案}
@@ -125,30 +125,37 @@ description: >-
 # 获取最新 commit message
 msg=$(git log -1 --format="%B")
 
-# 检查标题格式
-echo "$msg" | head -1 | grep -qE '^【(bug|change|feature)】' || echo "ERROR: 标题格式不符"
+# 检查标题格式（【类型】【JIRA-ID】概要描述）
+echo "$msg" | head -1 | grep -qE '^【(bug|change|feature)】【' || echo "ERROR: 标题格式不符"
 
-# 检查 JIRA-ID（已知前缀）
-echo "$msg" | head -1 | grep -qE '(CHYT1V|BAIC|KP31|CL|T1V|D01|XINCHI)-[0-9]+' || echo "ERROR: 缺少 JIRA-ID"
+# 检查 JIRA-ID（已知前缀，需被【】包裹）
+echo "$msg" | head -1 | grep -qE '【(CHYT1V|BAIC|KP31|CL|T1V|D01|XINCHI)-[0-9]+】' || echo "ERROR: 缺少 JIRA-ID 或未用【】包裹"
 
 # 检查必填字段存在性
 for field in "【原因分析】" "【解决方案】" "【自测用例】" "【自测方法】" "【影响范围】" "【代码修改量】" "【提交项目/分支】" "【体现版本】"; do
   echo "$msg" | grep -q "$field" || echo "ERROR: 缺少 $field"
 done
 
-# 检查门禁字段最低字数
+# 检查字段字数（最低 + 最高）
 check_field_length() {
-  local field="$1" min_len="$2"
+  local field="$1" min_len="$2" max_len="$3"
   local content=$(echo "$msg" | grep "$field" | sed "s/$field//")
   local len=${#content}
-  if [ "$len" -lt "$min_len" ]; then
+  if [ "$min_len" -gt 0 ] && [ "$len" -lt "$min_len" ]; then
     echo "ERROR: $field 内容不足 ${min_len} 字（当前 ${len} 字）"
   fi
+  if [ "$len" -gt "$max_len" ]; then
+    echo "ERROR: $field 内容超过 ${max_len} 字（当前 ${len} 字），请简明扼要"
+  fi
 }
-check_field_length "【原因分析】" 8
-check_field_length "【解决方案】" 8
-check_field_length "【自测用例】" 20
-check_field_length "【自测方法】" 4
+check_field_length "【原因分析】" 8 50
+check_field_length "【解决方案】" 8 50
+check_field_length "【自测用例】" 20 50
+check_field_length "【自测方法】" 4 50
+check_field_length "【影响范围】" 0 50
+check_field_length "【代码修改量】" 0 50
+check_field_length "【提交项目/分支】" 0 50
+check_field_length "【体现版本】" 0 50
 ```
 
 ---
