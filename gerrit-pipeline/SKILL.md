@@ -75,7 +75,7 @@ Step 4: 飞书通知              → 发送流水线结果卡片到飞书群
 #### 标题格式
 
 ```
-【类型】【JIRA-ID】概要描述
+【类型】【JIRA-ID】概要描述【x/y】
 ```
 
 - **类型**（必选其一）：`bug` / `change` / `feature`
@@ -84,12 +84,18 @@ Step 4: 飞书通知              → 发送流水线结果卡片到飞书群
   - `feature`：新功能开发
 - **JIRA-ID**：JIRA ticket 编号，用 `【】` 包裹，必须在 JIRA 上真实存在。已知前缀：`CHYT1V` / `BAIC` / `KP31` / `CL` / `T1V` / `D01` / `XINCHI` 等
 - **概要描述**：简明扼要说明改动内容
+- **【x/y】**（多仓库关联提交时必填）：关联提交序号标识，x 为当前提交序号，y 为总笔数，均为正整数。`【】` 为中文方括号。非关联提交时省略
 
 **示例**：
 ```
+# 单笔提交（无关联）
 【bug】【CHYT1V-1058】仪表双闪报警灯无提示音
 【feature】【CHYT1V-961】Carproperty 新增车辆属性支持
-【change】【CHYT1V-200】登录流程调整为异步模式
+
+# 多仓库关联提交（3 笔）
+【change】【CHYT1V-200】登录流程调整为异步模式【1/3】
+【change】【CHYT1V-200】SDK 接口同步更新【2/3】
+【change】【CHYT1V-200】sdk_release 版本更新【3/3】
 ```
 
 #### Body 必填字段
@@ -130,7 +136,59 @@ Step 4: 飞书通知              → 发送流水线结果卡片到飞书群
 
 > Change-Id 由 hook 自动追加，不要手动写入。
 
-### 1.3 提交前检查（本地预检）
+### 1.3 Topic（多仓库关联提交）
+
+当多个仓库的 Change 互相依赖、需要一起合入时，必须使用 Topic 关联。
+
+#### 使用场景
+
+- 多个仓库的代码修改互相依赖，需原子性合入
+- 典型场景：APK + SDK、FWK + SOC 等跨仓库联动
+
+#### 命名规则
+
+| 规则 | 说明 |
+|------|------|
+| 不能包含空格、冒号等特殊字符 | 仅允许字母、数字、下划线 `_`、连字符 `-` |
+| 多词连接 | 用下划线或驼峰格式 |
+| 必须唯一 | 在 Gerrit 搜索 `topic:xxx` 确认不重复 |
+
+**推荐命名格式**：`模块名_功能_日期`
+
+```
+D01_FWK_20250428
+D01_SOC_20250428
+BAIC_FWK_20250428
+Add-collect-log-function_20250428
+```
+
+#### 提交顺序要求
+
+1. 按 `【1/y】→【2/y】→...→【y/y】` 的顺序提交
+2. **最后一笔（【y/y】）必须最后 push**
+3. APK 场景下，`sdk_release` 的提交必须排在最后（如 3 笔关联提交，sdk_release 带【3/3】）
+4. commit message 和 topic 必须在本地编辑好再推送
+
+#### 合入规则
+
+- 多笔预编译通过后，**不要再推新的 patchset**
+- 必须**全部合入或全部不合**，不能只合一部分
+
+#### 补救措施
+
+如果 push 后发现漏加 topic 或【x/y】标识：
+- 可手动将最后一笔提交（如【3/3】）在 Gerrit 上 **Abandon → Restore**
+- 重新编辑 commit message 后 amend 推送
+
+#### Topic 名称校验
+
+```bash
+# 校验 topic 名称格式（仅允许字母、数字、下划线、连字符）
+topic_name="$1"
+echo "$topic_name" | grep -qE '^[A-Za-z0-9_-]+$' || echo "ERROR: Topic 名称包含非法字符（仅允许字母、数字、下划线、连字符）"
+```
+
+### 1.4 提交前检查（本地预检）
 
 在推送到 Gerrit 之前，按顺序执行以下检查：
 
@@ -148,12 +206,13 @@ Step 4: 飞书通知              → 发送流水线结果卡片到飞书群
 
 1. **标题**：以 `【bug】`、`【change】` 或 `【feature】` 开头
 2. **JIRA-ID**：标题中包含有效的 JIRA ticket 编号
-3. **Body 字段完整性**：确认 4 个门禁必检字段均存在且满足最低字数
+3. **【x/y】标识**（如存在）：x、y 为正整数，x ≤ y，`【】` 为中文方括号
+4. **Body 字段完整性**：确认 4 个门禁必检字段均存在且满足最低字数
    - 【原因分析】≥ 8 字
    - 【解决方案】≥ 8 字
    - 【自测用例】≥ 20 字
    - 【自测方法】≥ 4 字
-4. **其他必填字段**：确认【影响范围】【代码修改量】【提交项目/分支】【体现版本】存在
+5. **其他必填字段**：确认【影响范围】【代码修改量】【提交项目/分支】【体现版本】存在
 
 **校验脚本（供 Claude 内部调用）**：
 
@@ -166,6 +225,15 @@ echo "$msg" | head -1 | grep -qE '^【(bug|change|feature)】【' || echo "ERROR
 
 # 检查 JIRA-ID（已知前缀，需被【】包裹）
 echo "$msg" | head -1 | grep -qE '【(CHYT1V|BAIC|KP31|CL|T1V|D01|XINCHI)-[0-9]+】' || echo "ERROR: 缺少 JIRA-ID 或未用【】包裹"
+
+# 检查【x/y】标识格式（如存在）
+title=$(echo "$msg" | head -1)
+if echo "$title" | grep -qE '【[0-9]+/[0-9]+】'; then
+  x=$(echo "$title" | grep -oE '【[0-9]+/[0-9]+】' | grep -oE '[0-9]+' | head -1)
+  y=$(echo "$title" | grep -oE '【[0-9]+/[0-9]+】' | grep -oE '[0-9]+' | tail -1)
+  [ "$x" -gt 0 ] && [ "$y" -gt 0 ] || echo "ERROR: 【x/y】中 x 和 y 必须为正整数"
+  [ "$x" -le "$y" ] || echo "ERROR: 【x/y】中 x($x) 不能大于 y($y)"
+fi
 
 # 检查必填字段存在性
 for field in "【原因分析】" "【解决方案】" "【自测用例】" "【自测方法】" "【影响范围】" "【代码修改量】" "【提交项目/分支】" "【体现版本】"; do
@@ -205,10 +273,14 @@ Reviewer 列表从配置文件 `~/.config/gerrit-pipeline/config.json` 的 `gerr
 git push autolink HEAD:refs/for/{目标分支}%r={reviewer1},r={reviewer2}
 ```
 
-**携带 topic**（可选）：
+**携带 topic**（多仓库关联提交时必须）：
 
 ```bash
+# 关联提交必须带 topic
 git push autolink HEAD:refs/for/{目标分支}%r={reviewer1},r={reviewer2},topic={topic名称}
+
+# 示例：关联提交 push 到 al_chery-d01_dev2 分支
+git push autolink HEAD:refs/for/al_chery-d01_dev2%r=reviewer1,r=reviewer2,topic=D01_FWK_20250428
 ```
 
 **完整流程**：
@@ -264,49 +336,108 @@ git checkout {原分支}
 - 如果 cherry-pick 多个 commit，逐个操作并分别推送
 - 冲突解决后需确认 commit message 格式仍符合规范
 
-### 1.5 交互式辅助流程
+### 1.6 交互式辅助流程
 
-当用户触发提交流程时，Claude 按以下步骤辅助：
+当用户触发提交流程时，Claude 按以下步骤辅助。根据是否为关联提交，分为两条路径。
 
-#### 信息收集
+#### 第一步：确认是否为多仓库关联提交（最先确认）
 
-通过 AskUserQuestion 收集以下信息（如未从上下文中获取）：
+- 如果用户的触发指令中已包含 topic 相关关键词（如"关联提交"、"多仓库"、"topic"、明确给出了 topic 名称），则视为已确认，跳过此问
+- 否则首先通过 AskUserQuestion 询问用户
 
-1. **提交类型**：bug / change / feature
-2. **JIRA-ID**：如 CHYT1V-1234
-3. **概要描述**：一句话说明改动
-4. **目标分支**：从当前分支推断或询问用户
-5. **是否需要 topic**：可选
+---
 
-#### 自动生成 Commit Message
+#### 路径 A：非关联提交（单仓库）
 
-根据收集的信息和 `git diff --staged` 的内容，自动生成完整的 commit message：
+流程不变，与原有行为一致：
 
-1. 分析暂存的代码变更
+**信息收集**（通过 AskUserQuestion）：
+1. 提交类型：bug / change / feature
+2. JIRA-ID
+3. 概要描述
+4. 目标分支（从当前分支推断或询问）
+
+**自动生成 Commit Message**：
+1. 分析 `git diff --staged` 的内容
 2. 生成各必填字段内容（原因分析、解决方案等）
 3. 估算代码修改量
 4. 填充提交项目/分支和体现版本
 5. 展示给用户确认后提交
 
-#### 推送确认
+**推送确认**：
+- 确认目标分支、Reviewer 列表（从配置文件 `gerrit.reviewers` 读取）
+- 执行 git commit + git push
+- 提取 CR 编号
 
-推送前向用户确认：
-- 目标分支是否正确
-- Reviewer 列表是否需要调整（从配置文件 `gerrit.reviewers` 读取）
-- 是否需要添加 topic
+---
 
-### 1.6 常用命令速查
+#### 路径 B：多仓库关联提交
+
+**信息收集**（通过 AskUserQuestion，一次性收集所有共享信息）：
+1. **Topic 名称**（必填）：推荐格式 `模块名_功能_日期`，如 `D01_FWK_20250428`。校验不含空格、冒号等特殊字符
+2. **自动扫描变更仓库**：在当前 repo（manifest 管理）根目录下，通过 `repo status` 或遍历子仓库执行 `git status --porcelain` 扫描所有有代码变动的仓库，列出待提交仓库的绝对路径和变更文件数
+3. **用户确认关联仓库列表**：将扫描结果通过 AskUserQuestion（multiSelect）展示给用户。提示用户：**勾选需要关联提交的仓库，勾选完成后点击 Submit 确认**。确认后的仓库列表即为本次关联提交范围
+4. **提交顺序**：根据确认的仓库数量自动编号（【1/y】→【y/y】）。如涉及 APK 的 sdk_release 仓库，自动将其排到最后。用户可调整顺序
+5. **提交类型**：bug / change / feature（所有仓库共享）
+6. **JIRA-ID**（所有仓库共享）
+7. **概要描述**（所有仓库共享）
+8. **目标分支**（所有仓库共享，或各仓库分别指定）
+
+**扫描变更仓库的方法**：
+
+```bash
+# 方式一：使用 repo status（推荐，manifest 管理的仓库）
+repo status
+
+# 方式二：遍历子目录查找有变更的 git 仓库
+repo forall -c 'if [ -n "$(git status --porcelain)" ]; then echo "$(pwd)"; fi'
+```
+
+**遍历检查各仓库变更**：
+1. 按提交顺序，依次 `cd` 到每个仓库
+2. 检查每个仓库是否有未暂存/未提交的变更（`git status`）
+3. 获取每个仓库的 `git diff`
+
+**统一生成 Commit Message**：
+1. 所有仓库共享基础信息（类型、JIRA-ID、概要描述、body 各字段）
+2. 每个仓库的标题末尾自动追加对应的 `【x/y】` 标识
+3. 各仓库的 body 字段（原因分析、解决方案等）根据各自的 diff 内容分别生成
+
+**统一展示并确认**：
+1. 一次性展示所有仓库的 diff 摘要 + 生成的 commit message
+2. 通过 AskUserQuestion 请求用户统一确认（"全部确认" / "需要修改"）
+3. 用户确认后，按顺序依次执行
+
+**按顺序依次提交推送**：
+1. 按 `【1/y】→【2/y】→...→【y/y】` 的顺序，依次对每个仓库执行：
+   - `cd` 到仓库目录
+   - `git add` 暂存变更
+   - `git commit`（使用对应的 commit message）
+   - 本地校验 commit message 格式
+   - `git push autolink HEAD:refs/for/{目标分支}%r={reviewer1},r={reviewer2},topic={topic名称}`
+   - 提取 CR 编号
+2. **最后一笔（【y/y】）最后 push**
+3. 任一仓库 push 失败则中止后续仓库，向用户报告错误
+4. 全部 push 成功后，汇总所有 CR 编号
+
+**关联提交完成标志**：
+- 所有仓库均 push 成功
+- 所有 CR 共享同一 topic
+- 汇总输出：各仓库的 CR 编号、URL、提交顺序
+
+### 1.7 常用命令速查
 
 | 操作 | 命令 |
 |------|------|
 | 推送新 Change | `git push autolink HEAD:refs/for/{branch}%r={r1},r={r2}` |
-| 推送带 topic | `git push autolink HEAD:refs/for/{branch}%r={r1},r={r2},topic={topic}` |
+| 推送关联提交（带 topic） | `git push autolink HEAD:refs/for/{branch}%r={r1},r={r2},topic={topic}` |
 | amend 后推送 | `git commit --amend && git push autolink HEAD:refs/for/{branch}%r={r1},r={r2}` |
 | 查看 Gerrit Dashboard | 浏览器打开 `https://gerrit.auto-link.com.cn/dashboard/self` |
 | 查看 Change-Id | `git log -1 --format="%B" \| grep Change-Id` |
 | 检查 commit-msg hook | `ls -la .git/hooks/commit-msg` |
+| 搜索 topic 是否唯一 | Gerrit 搜索 `topic:{topic名称}` |
 
-### 1.7 注意事项
+### 1.8 注意事项
 
 1. **永远不要 `--no-verify`**：commit-msg hook 负责生成 Change-Id，跳过会导致推送失败
 2. **amend vs 新 commit**：修改已推送的 Change 用 amend；新的独立改动用新 commit
@@ -314,6 +445,7 @@ git checkout {原分支}
 4. **敏感文件排除**：不要提交 `.env`、密钥文件、凭证等敏感内容
 5. **分批提交**：大改动建议分批提交（在标题末尾标注如 `【1/3】`），每批独立可编译可测试
 6. **编译和测试**：推送前必须确保编译通过和单元测试通过
+7. **关联提交纪律**：多笔关联提交预编译通过后，不要再推新 patchset；必须全部合入或全部不合
 
 ### 本步骤完成标志
 
@@ -323,6 +455,7 @@ git checkout {原分支}
   - **Change URL**：完整的 Gerrit Change 链接
   - **提交标题**：commit message 的第一行
   - **目标分支**：push 的目标分支名
+- **关联提交场景**：所有仓库均 push 成功，汇总所有 CR 编号。后续步骤（评审、Checklist、飞书通知）对每个 CR 分别执行
 
 ### 提取 CR 编号的方法
 
@@ -361,17 +494,21 @@ Skill({ skill: "enhanced_code_review", args: "review CR <CR编号>" })
 
 其中 `<CR编号>` 替换为实际编号。
 
+**多仓库关联提交场景**：对 Step 1 产出的每个 CR 依次执行评审，逐个调用上述命令。每个 CR 独立产出评审评分和问题列表。
+
 ### 本步骤完成标志
 
 - 六维评审完成
 - 评审结论已贴到 Gerrit（cover message + inline comments）
 - 获取评审评分（+1 / 0 / -1）和发现的问题列表
+- **关联提交场景**：所有 CR 均完成评审
 
 ### 关键输出（供后续步骤使用）
 
 - **评审评分**：suggested_score（+1 / 0 / -1）
 - **P0/P1/P2/P3 计数**：各级别问题数量
 - **是否有阻塞性问题**：P0 > 0 或 P1 > 0
+- **关联提交场景**：每个 CR 各自独立的评审结果
 
 ### 独立操作
 
@@ -399,19 +536,21 @@ Skill({ skill: "enhanced_code_review", args: "review CR <CR编号>" })
 
 需要 CR 编号。完整流水线中由 Step 1 提供；独立操作时由用户提供。
 
+**多仓库关联提交场景**：对 Step 1 产出的每个 CR 依次执行 Checklist 贴回。每个 CR 独立展示 Checklist 并请求用户确认。
+
 ### 执行方式
 
 使用 `gerrit-pipeline/scripts/gerrit_post_checklist.py` 将 Checklist 贴到 Gerrit：
 
 ```bash
 # 方式一：从文件读取 Checklist
-cd /home/hualei/.claude/skills/gerrit-pipeline/scripts && python3 gerrit_post_checklist.py \
+cd <skill_dir>/scripts && python3 gerrit_post_checklist.py \
   --cr <CR编号> \
   --rev <revision_hash> \
   --checklist /tmp/checklist.txt
 
 # 方式二：直接传入 Checklist 文本
-cd /home/hualei/.claude/skills/gerrit-pipeline/scripts && python3 gerrit_post_checklist.py \
+cd <skill_dir>/scripts && python3 gerrit_post_checklist.py \
   --cr <CR编号> \
   --checklist-text "<Checklist 内容>"
 ```
@@ -484,6 +623,7 @@ python3 pipeline_config.py show
 调用 `gerrit-pipeline/scripts/feishu_notify.py` 发送飞书群消息：
 
 ```bash
+# 单仓库提交
 cd <skill_dir>/scripts && python3 feishu_notify.py \
   --cr <CR编号> \
   --url "<Gerrit Change URL>" \
@@ -491,6 +631,17 @@ cd <skill_dir>/scripts && python3 feishu_notify.py \
   --subject "<提交标题>" \
   --score <评审评分> \
   --p0 <P0数> --p1 <P1数> --p2 <P2数> --p3 <P3数> \
+  --checklist <pass|warn|fail>
+
+# 多仓库关联提交（增加 --topic 参数，一次性汇总所有 CR）
+cd <skill_dir>/scripts && python3 feishu_notify.py \
+  --topic <Topic名称> \
+  --cr <CR编号1>,<CR编号2>,... \
+  --url "<URL1>,<URL2>,..." \
+  --branch <目标分支> \
+  --subject "<共享概要描述>" \
+  --score <最低评审评分> \
+  --p0 <P0总数> --p1 <P1总数> --p2 <P2总数> --p3 <P3总数> \
   --checklist <pass|warn|fail>
 ```
 
@@ -509,6 +660,8 @@ cd <skill_dir>/scripts && python3 feishu_notify.py \
 | `--score` | 否 | 评审评分 -1/0/1（默认 1） | Step 2 输出 |
 | `--p0` ~ `--p3` | 否 | 各级别问题数（默认 0） | Step 2 输出 |
 | `--checklist` | 否 | Checklist 状态 pass/warn/fail（默认 pass） | Step 3 输出 |
+| `--topic` | 否 | Topic 名称（多仓库关联提交时必填） | Step 1 输出 |
+| `--repos` | 否 | 各 CR 对应仓库名，逗号分隔（多仓库时必填，与 --cr 一一对应） | Step 1 输出 |
 | `--chat-id` | 否 | 飞书群 ID（覆盖配置文件中的值） | — |
 | `--dry` | 否 | 仅预览不发送 | — |
 
@@ -521,8 +674,8 @@ cd <skill_dir>/scripts && python3 feishu_notify.py \
   "feishu": {
     "chat_id": "oc_xxxxxxxx",
     "at_members": [
-      {"name": "李新国", "open_id": "ou_xxxxxxxx"},
-      {"name": "谢杰", "open_id": "ou_xxxxxxxx"}
+      {"name": "审核人A", "open_id": "ou_xxxxxxxx"},
+      {"name": "审核人B", "open_id": "ou_xxxxxxxx"}
     ]
   }
 }
@@ -530,12 +683,27 @@ cd <skill_dir>/scripts && python3 feishu_notify.py \
 
 ### 飞书消息格式
 
-发送 interactive card（卡片消息），包含：
+发送 interactive card（卡片消息）。
+
+#### 单仓库提交卡片
 
 - **标题**：Gerrit Pipeline 通知（颜色随评审结果变化：绿/橙/红）
 - **CR 编号**：可点击跳转到 Gerrit
 - **分支** + **提交概要**
 - **评审评分** + **问题统计**
+- **Checklist 状态**
+- **审核人**：@mention 配置的成员
+
+#### 多仓库关联提交卡片
+
+当传入 `--topic` 参数时，使用多仓库卡片格式：
+
+- **标题**：Gerrit Pipeline 通知 — 关联提交（颜色随最低评审评分变化）
+- **Topic**：显示 topic 名称，可点击跳转到 Gerrit topic 搜索页（`https://gerrit.auto-link.com.cn/q/topic:xxx`）
+- **分支** + **提交概要**
+- **关联 CR 列表**：每个 CR 一行，显示仓库名 + CR 编号（可点击跳转）
+- **评审评分**：取所有 CR 中最低分
+- **问题统计**：所有 CR 问题数汇总
 - **Checklist 状态**
 - **审核人**：@mention 配置的成员
 
@@ -617,7 +785,9 @@ export FEISHU_APP_SECRET="<飞书应用 App Secret>"
 
 ## 流水线完成报告
 
-四步全部完成后，向用户输出简报：
+四步全部完成后，向用户输出简报。
+
+### 单仓库提交
 
 ```
 ## Gerrit Pipeline 完成
@@ -630,6 +800,27 @@ export FEISHU_APP_SECRET="<飞书应用 App Secret>"
 | Step 4: 飞书通知 | ✅ | 已发送到群 |
 
 🔗 Gerrit Change: <URL>
+```
+
+### 多仓库关联提交
+
+```
+## Gerrit Pipeline 完成（关联提交）
+
+**Topic**: <Topic名称>
+
+| 仓库 | CR | 评审评分 | 问题统计 | Checklist |
+|------|-----|---------|---------|-----------|
+| <仓库1> | [<CR1>](<URL1>) | +1 | P0=0 P1=0 P2=0 P3=0 | ✅ |
+| <仓库2> | [<CR2>](<URL2>) | +1 | P0=0 P1=0 P2=1 P3=0 | ✅ |
+| <仓库3> | [<CR3>](<URL3>) | +1 | P0=0 P1=0 P2=0 P3=1 | ✅ |
+
+| 步骤 | 状态 |
+|------|------|
+| Step 1: 代码提交 | ✅ 共 <n> 个仓库 |
+| Step 2: 代码评审 | ✅ 最低评分: +1 |
+| Step 3: Checklist | ✅ 已贴到 Gerrit |
+| Step 4: 飞书通知 | ✅ 已发送到群 |
 ```
 
 ---
