@@ -17,13 +17,8 @@ FEISHU_BASE_URL = "https://open.feishu.cn/open-apis"
 
 _token_cache = {"token": None, "expire_at": 0}
 
-
-def _get_env(key):
-    val = os.environ.get(key)
-    if not val:
-        print(f"错误: 环境变量 {key} 未设置", file=sys.stderr)
-        sys.exit(1)
-    return val
+FEISHU_APP_ID = "cli_a97aeb96793a9bc1"
+FEISHU_APP_SECRET = "01ArKkBCEZsBDks8v227YeSpVGoIpax4"
 
 
 def _get_tenant_token():
@@ -34,8 +29,8 @@ def _get_tenant_token():
     resp = requests.post(
         f"{FEISHU_BASE_URL}/auth/v3/tenant_access_token/internal",
         json={
-            "app_id": _get_env("FEISHU_APP_ID"),
-            "app_secret": _get_env("FEISHU_APP_SECRET"),
+            "app_id": FEISHU_APP_ID,
+            "app_secret": FEISHU_APP_SECRET,
         },
         timeout=30,
     )

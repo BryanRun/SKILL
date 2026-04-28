@@ -1,6 +1,6 @@
 # gerrit-pipeline — 使用说明
 
-**版本：v1.3.1**
+**版本：v1.4.0**
 
 gerrit-pipeline 是一个 Claude Code Skill，为车联 AutoLink 团队提供 Gerrit 代码提交评审一站式自动化能力。只需一句指令，即可完成从代码提交、自动评审、Checklist 贴回到飞书群通知的完整流水线，也支持每个步骤独立执行。目标是减少重复操作、统一提交规范、加速 Code Review 闭环。
 
@@ -18,10 +18,7 @@ Step 4: 飞书通知    → 发送评审结果卡片到飞书群，@审核人
 ### 2.1 前置条件
 
 1. **安装 enhanced_code_review skill**：Step 2（代码评审）依赖此 skill 提供六维自动评审能力。请将其解压到 `~/.claude/skills/enhanced_code_review/` 目录下，否则评审步骤无法执行。
-2. **飞书应用凭据**：Step 4（飞书通知）需要飞书应用凭据，应用需在 [飞书开放平台](https://open.feishu.cn) 开通以下权限：
-   - `im:message:send_as_bot` — 发送群消息
-   - `contact:user.base:readonly` — 查询用户 open_id（用于 @mention）
-3. **飞书机器人入群**：应用对应的机器人需已加入目标飞书群，否则无法发送通知。
+2. **飞书机器人入群**：在目标飞书群中添加名为 **WALL-E** 的机器人（群设置 → 群机器人 → 添加机器人 → 搜索「WALL-E」），否则无法发送通知。
 
 ### 2.2 方式一：Claude Code 快速配置（推荐）
 
@@ -33,9 +30,8 @@ Step 4: 飞书通知    → 发送评审结果卡片到飞书群，@审核人
 
 Claude 会通过对话交互引导你完成全部配置，包括：
 
-1. **环境变量**：飞书 App ID / App Secret（自动写入 `~/.bashrc`）
-2. **Gerrit 凭据**：用户名、HTTP 密码、默认 Reviewer 列表
-3. **飞书通知**：目标群 chat_id、需要 @mention 的审核人
+1. **Gerrit 凭据**：用户名、HTTP 密码、默认 Reviewer 列表
+2. **飞书通知**：目标群 chat_id、需要 @mention 的审核人
 
 整个过程无需手动编辑任何文件或运行脚本，Claude 会自动完成环境变量设置和配置文件生成。
 
@@ -43,16 +39,7 @@ Claude 会通过对话交互引导你完成全部配置，包括：
 
 ### 2.3 方式二：手动配置
 
-#### 2.3.1 设置环境变量
-
-在 `~/.bashrc` 或 `~/.zshrc` 中添加：
-
-```bash
-export FEISHU_APP_ID="your_app_id"
-export FEISHU_APP_SECRET="your_app_secret"
-```
-
-#### 2.3.2 初始化配置文件
+#### 2.3.1 初始化配置文件
 
 ```bash
 cd ~/.claude/skills/gerrit-pipeline/scripts
@@ -152,8 +139,7 @@ Claude 会按 Step 1 → 2 → 3 → 4 顺序自动执行全部步骤。
 
 1. Python 3.6+
 2. `requests` 库（`pip install requests`）
-3. 飞书应用凭据（环境变量）
-4. Gerrit SSH 访问权限（用于 git push）
+3. Gerrit SSH 访问权限（用于 git push）
 5. **enhanced_code_review skill**：Step 2（代码评审）依赖此 skill 提供六维自动评审能力，需同步安装到 `~/.claude/skills/` 目录下
 
 > Step 1（代码提交）、Step 3（Checklist）、Step 4（飞书通知）为内置能力，无额外 skill 依赖。
@@ -161,9 +147,7 @@ Claude 会按 Step 1 → 2 → 3 → 4 顺序自动执行全部步骤。
 ## 7. 常见问题
 
 **Q1: 飞书通知发送失败？**
-1. 检查 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET` 是否已设置
-2. 确认飞书应用已开通 `im:message:send_as_bot` 权限
-3. 确认机器人已加入目标群
+1. 确认 **WALL-E** 机器人已加入目标群
 
 **Q2: @mention 不生效？**
 1. 确认配置中的 `open_id` 正确（可通过 `pipeline_config.py lookup-users` 重新查询）
@@ -180,6 +164,7 @@ Claude 会按 Step 1 → 2 → 3 → 4 顺序自动执行全部步骤。
 
 | 版本 | 日期 | 变更摘要 |
 |------|------|---------|
+| v1.4.0 | 2026-04-28 | 1. 内置公共飞书应用凭证，用户无需再配置 `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 环境变量 |
 | v1.3.1 | 2026-04-28 | 1. 飞书通知卡片中 Topic 改为可点击的 Gerrit 链接，跳转到 topic 搜索页 |
 | v1.3.0 | 2026-04-27 | 1. 新增 Topic（多仓库关联提交）完整规范<br>2. 支持命名规则、【x/y】关联标识、提交顺序约束、合入纪律<br>3. 新增 Topic 名称格式校验脚本<br>4. 交互流程每次询问是否为关联提交<br>5. 自动扫描有变更的仓库，支持 multiSelect 确认<br>6. 多仓库场景下 Step 2/3 逐 CR 执行，Step 4 汇总通知 |
 | v1.2.0 | 2026-04-27 | 1. Commit message body 各字段新增 50 字上限约束<br>2. 校验脚本同步增加最大字数检查 |

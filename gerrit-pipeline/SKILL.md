@@ -707,14 +707,9 @@ cd <skill_dir>/scripts && python3 feishu_notify.py \
 - **Checklist 状态**
 - **审核人**：@mention 配置的成员
 
-### 环境变量
+### 飞书应用权限
 
-需确保以下环境变量已设置：
-
-```bash
-export FEISHU_APP_ID="<飞书应用 App ID>"
-export FEISHU_APP_SECRET="<飞书应用 App Secret>"
-```
+脚本已内置公共飞书应用凭证，无需设置环境变量。
 
 飞书应用需开通权限：
 - `im:message:send_as_bot` — 发送群消息
@@ -733,8 +728,7 @@ export FEISHU_APP_SECRET="<飞书应用 App Secret>"
 
 ### 失败处理
 
-- 如环境变量未设置，提示用户设置 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET`
-- 如权限不足，提示用户在飞书开放平台开通 `im:message:send_as_bot` 权限
+- 如飞书应用权限不足，提示用户联系管理员开通 `im:message:send_as_bot` 权限
 - 飞书通知失败不影响前序步骤的结果（代码已提交、评审已贴出）
 
 ---
@@ -832,6 +826,6 @@ export FEISHU_APP_SECRET="<飞书应用 App Secret>"
 3. **Self-review 限制**：Gerrit 禁止对自己的 CR 打分，评审评论会以不带 Code-Review label 的方式贴出
 4. **Checklist 自动标注**：Claude 根据评审结果自动填写，人工 reviewer 可在 Gerrit 上修改
 5. **失败中止**：Step 1 失败则整个流水线中止；Step 2/3 失败不影响后续步骤；Step 4 失败不影响已完成的提交和评审
-6. **飞书环境变量**：Step 4 需要 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET`，未设置时跳过并提示用户
+6. **飞书通知**：Step 4 使用内置公共飞书应用，无需额外配置凭证
 7. **独立操作**：每步可单独触发，Claude 会收集缺少的必要信息
 8. **外部依赖**：Step 2（代码评审）依赖 enhanced_code_review skill，需同步安装；Step 1/3/4 为内置能力，无外部依赖
