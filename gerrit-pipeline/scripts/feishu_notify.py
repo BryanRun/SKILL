@@ -1,9 +1,18 @@
 """feishu_notify.py — 发送 Gerrit Pipeline 通知到飞书群。
 
 用法：
+  # 单仓库提交
   python3 feishu_notify.py --cr 1003659 --url "https://..." --branch al_dev \
       --subject "【feature】..." --score 1 --p0 0 --p1 0 --p2 0 --p3 1 \
       --checklist pass
+
+  # 多仓库关联提交
+  python3 feishu_notify.py --topic D01_FWK_20250428 \
+      --cr 1003659,1003660,1003661 \
+      --url "https://url1,https://url2,https://url3" \
+      --repos "frameworks/base,packages/apps/Settings,vendor/autolink/sdk_release" \
+      --branch al_dev --subject "【feature】..." \
+      --score 1 --p0 0 --p1 0 --p2 0 --p3 1 --checklist pass
 
   python3 feishu_notify.py --dry ...   # 仅预览，不实际发送
 
@@ -107,6 +116,12 @@ def _build_at_text(at_members):
 
 
 def build_card(args, at_members=None, submitter=None):
+    if args.topic:
+        return build_topic_card(args, at_members=at_members, submitter=submitter)
+    return build_single_card(args, at_members=at_members, submitter=submitter)
+
+
+def build_single_card(args, at_members=None, submitter=None):
     score_display = _score_text(args.score)
     checklist_display = _checklist_text(args.checklist)
     issues = f"P0={args.p0}  P1={args.p1}  P2={args.p2}  P3={args.p3}"
@@ -184,12 +199,108 @@ def build_card(args, at_members=None, submitter=None):
     return json.dumps(card, ensure_ascii=False)
 
 
+def build_topic_card(args, at_members=None, submitter=None):
+    score_display = _score_text(args.score)
+    checklist_display = _checklist_text(args.checklist)
+    issues = f"P0={args.p0}  P1={args.p1}  P2={args.p2}  P3={args.p3}"
+
+    header_color = "green"
+    if args.score < 0 or args.p0 > 0:
+        header_color = "red"
+    elif args.score == 0 or args.p1 > 0:
+        header_color = "orange"
+
+    submitter_text = ""
+    if submitter:
+        open_id = submitter.get("open_id", "")
+        name = submitter.get("name", "")
+        if open_id:
+            submitter_text = f"<at id={open_id}></at>"
+        elif name:
+            submitter_text = name
+
+    cr_list = [c.strip() for c in args.cr.split(",")]
+    url_list = [u.strip() for u in args.url.split(",")]
+    repo_list = [r.strip() for r in args.repos.split(",")] if args.repos else [f"repo{i+1}" for i in range(len(cr_list))]
+
+    cr_lines = []
+    for i in range(len(cr_list)):
+        cr = cr_list[i]
+        url = url_list[i] if i < len(url_list) else ""
+        repo = repo_list[i] if i < len(repo_list) else ""
+        cr_lines.append(f"- **{repo}**: [{cr}]({url})")
+    cr_text = "\n".join(cr_lines)
+
+    elements = [
+        {
+            "tag": "div",
+            "fields": [
+                {"is_short": True, "text": {"tag": "lark_md", "content": f"**Topic**\n[{args.topic}](https://gerrit.auto-link.com.cn/q/topic:{args.topic})"}},
+                {"is_short": True, "text": {"tag": "lark_md", "content": f"**分支**\n{args.branch}"}},
+            ],
+        },
+        {
+            "tag": "div",
+            "fields": [
+                {"is_short": True, "text": {"tag": "lark_md", "content": f"**提交人**\n{submitter_text}" if submitter_text else "**提交人**\n-"}},
+                {"is_short": True, "text": {"tag": "lark_md", "content": f"**评审评分**\n{score_display}"}},
+            ],
+        },
+        {
+            "tag": "div",
+            "fields": [
+                {"is_short": True, "text": {"tag": "lark_md", "content": f"**Checklist**\n{checklist_display}"}},
+                {"is_short": True, "text": {"tag": "lark_md", "content": f"**问题统计**\n{issues}"}},
+            ],
+        },
+        {
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": f"**提交概要**\n{args.subject}"},
+        },
+        {
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": f"**关联 CR 列表**\n{cr_text}"},
+        },
+    ]
+
+    at_text = _build_at_text(at_members)
+    if at_text:
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": f"**审核人**\n{at_text}"},
+        })
+        elements.append({
+            "tag": "div",
+            "text": {"tag": "lark_md", "content": "⏰ 请审核人于当日 24:00 前完成 Code Review 及 Merge，谢谢！"},
+        })
+
+    elements.append({"tag": "hr"})
+    elements.append({
+        "tag": "note",
+        "elements": [
+            {"tag": "plain_text", "content": "由 Gerrit Pipeline 自动发送"},
+        ],
+    })
+
+    card = {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": "Gerrit Pipeline 通知 — 关联提交"},
+            "template": header_color,
+        },
+        "elements": elements,
+    }
+    return json.dumps(card, ensure_ascii=False)
+
+
 def main():
     ap = argparse.ArgumentParser(description="发送 Gerrit Pipeline 通知到飞书群")
-    ap.add_argument("--cr", required=True, help="CR 编号")
-    ap.add_argument("--url", required=True, help="Gerrit Change URL")
+    ap.add_argument("--cr", required=True, help="CR 编号（多仓库时逗号分隔）")
+    ap.add_argument("--url", required=True, help="Gerrit Change URL（多仓库时逗号分隔）")
     ap.add_argument("--branch", default="al_dev", help="目标分支")
     ap.add_argument("--subject", required=True, help="提交标题")
+    ap.add_argument("--topic", default=None, help="Topic 名称（多仓库关联提交时必填）")
+    ap.add_argument("--repos", default=None, help="各 CR 对应仓库名，逗号分隔（多仓库时必填，与 --cr 一一对应）")
     ap.add_argument("--score", type=int, default=1, help="评审评分 (-1/0/1)")
     ap.add_argument("--p0", type=int, default=0, help="P0 问题数")
     ap.add_argument("--p1", type=int, default=0, help="P1 问题数")

@@ -118,7 +118,7 @@ def cmd_init(args):
         sys.exit(1)
 
     reviewers_default = ",".join(gerrit.get("reviewers", []))
-    reviewers_input = input(f"Gerrit Reviewers (逗号分隔, 如 xiejie,lixinguo) [{reviewers_default}]: ").strip()
+    reviewers_input = input(f"Gerrit Reviewers (逗号分隔, 如 reviewer1,reviewer2) [{reviewers_default}]: ").strip()
     if reviewers_input:
         gerrit["reviewers"] = [r.strip() for r in reviewers_input.split(",") if r.strip()]
 
@@ -140,7 +140,7 @@ def cmd_init(args):
     if existing:
         print(f"当前成员: {', '.join(m['name'] for m in existing)}")
 
-    emails_input = input("成员邮箱 (如 lixinguo@auto-link.com.cn,xiejie@auto-link.com.cn): ").strip()
+    emails_input = input("成员邮箱 (如 user1@company.com,user2@company.com): ").strip()
     if emails_input:
         emails = [e.strip() for e in emails_input.split(",") if e.strip()]
         print("\n正在查询飞书 open_id ...")
