@@ -1,6 +1,6 @@
 # gerrit-pipeline — 使用说明
 
-**版本：v1.4.0**
+**版本：v1.5.1**
 
 gerrit-pipeline 是一个 Claude Code Skill，为车联 AutoLink 团队提供 Gerrit 代码提交评审一站式自动化能力。只需一句指令，即可完成从代码提交、自动评审、Checklist 贴回到飞书群通知的完整流水线，也支持每个步骤独立执行。目标是减少重复操作、统一提交规范、加速 Code Review 闭环。
 
@@ -77,6 +77,7 @@ python3 pipeline_config.py lookup-users --emails "user1@company.com" --save
 
 ```
 gerrit pipeline
+gp
 一键提交
 提交并评审
 ```
@@ -164,6 +165,8 @@ Claude 会按 Step 1 → 2 → 3 → 4 顺序自动执行全部步骤。
 
 | 版本 | 日期 | 变更摘要 |
 |------|------|---------|
+| v1.5.1 | 2026-04-29 | 1. 新增触发词 `gp`（gerrit pipeline 缩写），简化调用 |
+| v1.5.0 | 2026-04-29 | 1. 【开发自测视频】字段改为可选，由用户交互选择是否添加<br>2. Commit message 严格符合模板，禁止 Co-Authored-By 等模板外多余行<br>3. Step 3 与 Step 4 之间新增确认步骤，确保 Gerrit 门禁通过后再发送飞书通知 |
 | v1.4.0 | 2026-04-28 | 1. 内置公共飞书应用凭证，用户无需再配置 `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 环境变量 |
 | v1.3.1 | 2026-04-28 | 1. 飞书通知卡片中 Topic 改为可点击的 Gerrit 链接，跳转到 topic 搜索页 |
 | v1.3.0 | 2026-04-27 | 1. 新增 Topic（多仓库关联提交）完整规范<br>2. 支持命名规则、【x/y】关联标识、提交顺序约束、合入纪律<br>3. 新增 Topic 名称格式校验脚本<br>4. 交互流程每次询问是否为关联提交<br>5. 自动扫描有变更的仓库，支持 multiSelect 确认<br>6. 多仓库场景下 Step 2/3 逐 CR 执行，Step 4 汇总通知 |

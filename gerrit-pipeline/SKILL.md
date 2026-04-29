@@ -3,7 +3,7 @@ name: gerrit-pipeline
 description: >-
   Gerrit 一键提交评审流水线。串联 代码提交 → CR评审 → Checklist → 飞书通知 四步流程，严格按顺序依次调用各步骤。每步均支持独立操作。
   内置完整的 Gerrit 代码提交能力（commit message 规范、推送、amend、cherry-pick）。
-  触发：gerrit pipeline / 一键提交 / 提交并评审 / submit and review / 一键提交评审 /
+  触发：gerrit pipeline / gp / 一键提交 / 提交并评审 / submit and review / 一键提交评审 /
   独立操作：pipeline submit / gerrit submit / gerrit push / gerrit amend / gerrit cherry-pick / 提交到gerrit / 推送代码 / 提交代码审查 / 推代码 / 提交CR /
   pipeline review / pipeline checklist / pipeline notify / 飞书通知
 ---
@@ -20,7 +20,7 @@ description: >-
 
 以下任一表述触发完整四步流水线：
 
-- `gerrit pipeline` — 执行完整流水线
+- `gerrit pipeline` / `gp` — 执行完整流水线
 - `一键提交` / `一键提交评审` — 提交 + 评审 + Checklist + 飞书通知
 - `提交并评审` / `submit and review` — 同上
 - `pipeline` — 简写触发
@@ -112,6 +112,7 @@ Step 4: 飞书通知              → 发送流水线结果卡片到飞书群
 | 【代码修改量】 | — | 50 字 | 修改的代码行数（估算即可） |
 | 【提交项目/分支】 | — | 50 字 | 提交的目标项目和分支名 |
 | 【体现版本】 | — | 50 字 | 改动将体现在哪个版本中 |
+| 【开发自测视频】（可选） | — | — | 用户选择添加时，内容固定为：`申请豁免，原因：已自测通过，请实车验证` |
 
 #### Change-Id
 
@@ -132,6 +133,8 @@ Step 4: 飞书通知              → 发送流水线结果卡片到飞书群
 【代码修改量】{修改行数}
 【提交项目/分支】{目标分支}
 【体现版本】{体现版本日期或版本号}
+（可选，用户选择添加时包含下行）
+【开发自测视频】申请豁免，原因：已自测通过，请实车验证
 ```
 
 > Change-Id 由 hook 自动追加，不要手动写入。
@@ -213,6 +216,8 @@ echo "$topic_name" | grep -qE '^[A-Za-z0-9_-]+$' || echo "ERROR: Topic 名称包
    - 【自测用例】≥ 20 字
    - 【自测方法】≥ 4 字
 5. **其他必填字段**：确认【影响范围】【代码修改量】【提交项目/分支】【体现版本】存在
+6. **开发自测视频**（可选）：如用户选择添加，确认【开发自测视频】存在且内容为固定值
+7. **严格符合模板**：commit message body 只能包含模板中定义的字段，不得有任何模板外的多余行（如 Co-Authored-By、Signed-off-by 等）
 
 **校验脚本（供 Claude 内部调用）**：
 
@@ -260,6 +265,14 @@ check_field_length "【影响范围】" 0 50
 check_field_length "【代码修改量】" 0 50
 check_field_length "【提交项目/分支】" 0 50
 check_field_length "【体现版本】" 0 50
+
+# 检查 body 中是否存在模板外的多余行（标题、空行、已知字段、Change-Id 行除外）
+allowed_fields="【原因分析】|【解决方案】|【自测用例】|【自测方法】|【影响范围】|【代码修改量】|【提交项目/分支】|【体现版本】|【开发自测视频】|Change-Id:"
+echo "$msg" | tail -n +2 | while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  echo "$line" | grep -qE "^($allowed_fields)" && continue
+  echo "ERROR: commit message 中存在模板外的多余行: $line"
+done
 ```
 
 ### 1.4 推送工作流
@@ -356,6 +369,7 @@ git checkout {原分支}
 2. JIRA-ID
 3. 概要描述
 4. 目标分支（从当前分支推断或询问）
+5. **开发自测视频**（可选）：通过 AskUserQuestion 询问用户是否需要添加【开发自测视频】字段；选"需要"→ commit message 末尾加入固定行 `【开发自测视频】申请豁免，原因：已自测通过，请实车验证`；选"不需要"→ 不添加此行
 
 **自动生成 Commit Message**：
 1. 分析 `git diff --staged` 的内容
@@ -382,6 +396,7 @@ git checkout {原分支}
 6. **JIRA-ID**（所有仓库共享）
 7. **概要描述**（所有仓库共享）
 8. **目标分支**（所有仓库共享，或各仓库分别指定）
+9. **开发自测视频**（可选）：通过 AskUserQuestion 询问用户是否需要添加【开发自测视频】字段；选"需要"→ 所有仓库 commit message 末尾均加入固定行 `【开发自测视频】申请豁免，原因：已自测通过，请实车验证`；选"不需要"→ 不添加此行
 
 **扫描变更仓库的方法**：
 
@@ -588,6 +603,30 @@ Claude 根据 Step 2 的评审结果和实际情况，自动标注每项：
 
 - Gerrit API 返回 200
 - Checklist 已成功贴到 CR 评论中
+
+---
+
+## Step 3.5：发送飞书通知前确认
+
+在完整流水线中，执行飞书通知（Step 4）之前，**必须**通过 AskUserQuestion 向用户确认该笔提交已具备可 Review / Merge 的条件。
+
+**确认提示**：
+
+> 即将发送飞书通知，请先确认以下事项：
+> 1. Gerrit 门禁（prebuild / precheck）已通过或正在进行中
+> 2. 所有关联 Change（若有）均已推送并具备合入条件
+> 3. Reviewer 已准备好进行评审
+
+**选项**（通过 AskUserQuestion 展示）：
+
+| 选项 | 行为 |
+|------|------|
+| 确认，发送飞书通知 | 继续执行 Step 4 |
+| 暂不发送，稍后手动触发 | 中止流水线，不发送飞书通知（已完成的提交、评审、Checklist 结果不受影响） |
+
+**多仓库关联提交场景**：在确认提示中列出所有 CR 编号及其当前状态，统一确认后再发送。
+
+**独立操作不受影响**：当用户直接触发 `pipeline notify` / `飞书通知` 时，视为用户已自行确认，跳过本步骤。
 
 ---
 
