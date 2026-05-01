@@ -1,6 +1,27 @@
-# enhanced_code_review · 增强版代码评审 v2.0.0
+# enhanced_code_review · 增强版代码评审 v2.1.2
 
-本目录为 **enhanced_code_review** 技能包：在 **gerrit-review** 全部能力（六维、脚本链、Gerrit 自动化）基础上增加 **本地模块评审**（无 CR 号）。原版仅 Gerrit 场景可继续使用 `~/.cursor/skills/gerrit-review` 或 `gerrit-review-v2.0.0.zip`。
+本目录为 **enhanced_code_review** 技能包：在 **gerrit-review** 全部能力（七维、脚本链、Gerrit 自动化）基础上增加 **本地模块评审**（无 CR 号）。原版仅 Gerrit 场景可继续使用 `~/.cursor/skills/gerrit-review` 或 `gerrit-review-v2.1.0.zip`。
+
+## 运行时要求
+
+- **最低支持 Python 3.6.9**（v2.1.2 起明示，已在 docker `python:3.6.15-slim` 与本机 Python 3.10.12 联合验证）。第三方依赖 `requests` / `urllib3` 由使用方自行安装。
+
+## v2.1.2 新增
+
+- **commit message 中【开发自测视频】链接段豁免**：`gerrit_client.extract_jira_violations` 不再把【开发自测视频】/【关联视频】/【关联链接】/【关联文档】/【下载链接】/【录屏】/【录像】/【录制视频】/【验收视频】/【评审视频】整段、以及任意行内 URL（http(s):// / ftp:// / file:// / www.）中的 5+ 位数字识别为「缺前缀的 Jira 号」（P1 回归）；占位号检测、正文 `bare_number` 检测保持原有强度。
+- **回退至 Python 3.6.9 兼容**：删除所有 `from __future__ import annotations`、PEP 585/604 下标注解与 `@dataclass`，改用 `typing` 模块 + 普通类；`subprocess.run` 改回 `stdout=PIPE, stderr=PIPE, universal_newlines=True` 经典写法。功能 0 改变。
+
+## v2.1.1 新增
+
+- **本地模块评审适配车载多仓库 / git submodule / Android `repo` 工具**：`local_module_prepare.py` 新增 `--repo auto`，自动从模块路径回溯定位最近的 `.git`；区分 `dir / file / symlink` 三种 `.git` 形态；对 git submodule 回溯 superproject；对 `repo` 工具探测 `.repo/manifests` 根；子模块未初始化时输出复制即用的 `git -C <super> submodule update --init -- <path>`，**只描述、不自动执行**。
+- **不再要求**「在仓库根执行」；旧用法（`cd <repo> && python3 ... <相对路径>` 或 `--repo <显式路径>`）保持兼容，新版仅追加 `topology` 字段。
+- 详见 `references/09-local-module-review.md` 的「专章：子模块 / 多仓库 / repo 工具适配」。
+
+## v2.1.0 既有能力（保留）
+
+- **隐私合规维度（P0）**：基于《产品功能 信息安全要求-v1.2-20260210》+《附录-个人信息定义》。
+- **高精确率触发**：三重门控（数据 A / 去向 B / 语义 C）全部命中才作为 P0 inline 评论，**宁可漏报不可误报**。
+- `references/10-privacy-compliance.md` + `scripts/privacy_compliance_scan.py`；已挂接到 `gerrit_audit.py` 与 `local_module_prepare.py`。
 
 ---
 
@@ -16,7 +37,7 @@
 
 ---
 
-## 6 大评审维度（**每次必全扫**）
+## 7 大评审维度（**每次必全扫**）
 
 1. **SOLID 原则** — SRP / OCP / LSP / ISP / DIP
 2. **安全性** — AuthN/AuthZ / 注入 / 并发 / 资源 / IPC / 加密
@@ -24,6 +45,7 @@
 4. **错误处理 + 边界** — 空 catch / RemoteException / null / 溢出 / off-by-one
 5. **代码质量 + Google Style** — 缩进空格 / 命名 / imports / braces / Javadoc
 6. **车载中间件专项** — 状态机 / 线程 / IPC / 电源 / 诊断 / OTA / 配置
+7. **隐私合规（P0）** — 个人信息 / 敏感数据 × 传输 / 存储 / 日志 / 权限 / 跨端 / 撤回；**三重门控触发**
 
 即使某维度无发现，也在 cover 声明"已扫 X 维度，无发现"。
 
@@ -46,10 +68,10 @@
 ## 项目规范（车联 AutoLink）
 
 ### 硬性
-- **Java 缩进 4 空格，禁用 tab**（项目硬规范、2026-04-19 志强明确），P1
-- **C++ 缩进 4 空格，禁用 tab**（项目硬规范、2026-04-19 志强明确），P1
+- **Java 缩进 4 空格，禁用 tab**（项目硬规范、2026-04-19 团队约定），P1
+- **C++ 缩进 4 空格，禁用 tab**（项目硬规范、2026-04-19 团队约定），P1
 - **C++ 风格不强制 Google Style**，**必须遵循项目原有代码风格**，P1
-- **commit message 必带 Jira 号**（CHYT1V/BAIC/KP31/CL/T1V/D01）— 缺失 P0 → -1
+- **commit message 必带合规 Jira 号**（CHYT1V / BAIC / KP31 / FL1 / FL2 / FL3 / T1V / D01 / CHYT12A / CHYMIFA）— 缺失 P0 → -1；占位号（000/0001）P0 → -1；纯数字（如 123456）P0 → -1
 
 ### YAGNI
 - **作为 P3 建议，不强制**（不阻断合入，仅作治理指引）
@@ -60,7 +82,7 @@
 
 ### 项目允许（非违规）
 - `e.printStackTrace()` — 允许
-- commit message 格式错别字 / 代码修改量 — 志强不管
+- commit message 格式错别字 / 代码修改量 — 团队约定不纳入评审
 - Log 封装类 / TAG / JavaDoc — 无明文规范时不强制
 
 ### 冲突处理
@@ -74,7 +96,7 @@
 
 | 级别 | 场景 | Gerrit 分 |
 |---|---|---|
-| P0 Critical | 真崩溃 / 数据丢失 / 安全 / 缺 Jira | **-1** |
+| P0 Critical | 真崩溃 / 数据丢失 / 安全 / Jira 缺失或不合规 | **-1** |
 | P1 Important | 线程安全 / 架构混淆 / IPC 挂死 | **0** |
 | P2 Medium | Google Style 违反 / code smell | **+1** |
 | P3 Low | 可选改进 | **+1** |
@@ -102,22 +124,24 @@
   │   └─ 5 要素完整（问题+依据+原理+建议+Before/After）
   ├─ preflight check self 分数
   ├─ gerrit_post 贴回（或跳过）
-  └─ 飞书简报给志强
+  └─ 飞书简报给指定接收人（由团队配置）
 ```
 
 ---
 
-## 环境
+## 环境（Gerrit 凭据须自行配置）
+
+本技能**不包含**任何默认账号或 HTTP 密码。使用 Gerrit 脚本前请在 shell 中设置：
 
 ```bash
-export GERRIT_BASE="https://gerrit.auto-link.com.cn"
-export GERRIT_USER="hualei"
-export GERRIT_HTTP_PASSWORD="..."
+export GERRIT_BASE="https://gerrit.auto-link.com.cn"   # 或贵司 Gerrit 实例
+export GERRIT_USER="<你的 Gerrit 用户名>"
+export GERRIT_HTTP_PASSWORD="<Gerrit 个人设置中的 HTTP 密码>"
 ```
 
 ## 触发方式
 
-志强只要说：
+用户发起即可，例如：
 - `review CR 993636` → 全自动评审 + 贴回（preflight 不抢分数）
 - `review 林明的代码` → 列 open CR 清单
 - `gerrit inbox` / `今天待审` → 待审概览
@@ -183,4 +207,4 @@ gerrit-review/
 ### 995945 · ouqijiang · BAIC-61277 Power
 - ✅ 修复主路径正确（MSG 通道改对）
 - ✅ 顺带重构合理（5 分支合并 / SRP / dead code 清理）
-- 结果: skill 判 +1，志强已投 +2 在先，preflight 保护不覆盖
+- 结果: skill 判 +1，人工已投 +2 在先，preflight 保护不覆盖

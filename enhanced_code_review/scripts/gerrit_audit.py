@@ -4,25 +4,30 @@
   python3 gerrit_audit.py <CR_NUMBER>                 # 输出评审草稿到 stdout
   python3 gerrit_audit.py <CR_NUMBER> -o review.json  # 保存到文件
 
-说明：本脚本做**机械规则扫描**（降低志强的遗漏风险），真正的高质量评审仍需要 LLM
+说明：本脚本做**机械规则扫描**（降低遗漏风险），真正的高质量评审仍需要 LLM
 对全量 diff 跑一遍 checklist。所以用法上是：
   1) 本脚本先扫出"硬规则"命中项（null check 缺失、e.printStackTrace、Jira 缺失等）
   2) 把 diff + 硬规则结果一起给 LLM，让 LLM 补 L1/L3 架构类问题
-  3) 人工（志强）审核 → post
+  3) 人工审核 → post
 """
 import sys, re, json, argparse
 from gerrit_client import (
     get_cr_detail, get_file_diff, iter_diff_lines,
-    extract_jira, find_related_crs, BASE
+    extract_jira, extract_jira_violations, find_related_crs, BASE
 )
 try:
     from consistency_scan import analyze_file as scan_consistency
 except ImportError:
     scan_consistency = None
 
+try:
+    from privacy_compliance_scan import scan_diff_added as _privacy_scan_diff
+except ImportError:
+    _privacy_scan_diff = None
+
 # 机械规则 ---------------------------------------------------------------
 # 原则：只保留团队公认的硬规范。
-# 志强 2026-04-19 明确：e.printStackTrace() 不算规范问题，不纳入规则。
+# 团队约定 2026-04-19：e.printStackTrace() 不算规范问题，不纳入规则。
 # 只保留：空 catch 吞异常（必中 P1）、TODO 无主（P3）、System.out 服务禁用（P2）
 #
 # 注意：以下规则都是"低级模式识别"，真正的评审价值在 LLM 按 checklist 推理。
@@ -41,7 +46,9 @@ RULES = [
      "服务层禁用 System.out/err（调试遗留？）。与项目统一 Log 规范不一致。"),
 
     # TODO 无主
-    ("R.TODO_NO_OWNER", re.compile(r"//\s*TODO(?!.*(?:@|\bJira\b|\bCHYT1V\b|\bBAIC\b|\bKP31\b))"), "P3",
+    ("R.TODO_NO_OWNER", re.compile(
+        r"//\s*TODO(?!.*(?:@|\bJira\b|\bCHYT1V\b|\bBAIC\b|\bKP31\b|\bFL[123]\b|\bT1V\b|\bD01\b|\bCHYT12A\b|\bCHYMIFA\b))"
+    ), "P3",
      "TODO 未关联 owner / Jira",
      "TODO 需附 owner 或 Jira 号，否则随时间推移会变成无主债。"),
 ]
@@ -81,6 +88,9 @@ def analyse_cr(cr_num):
         "summary": {"P0": 0, "P1": 0, "P2": 0, "P3": 0},
         "suggested_score": 0,
         "cover": "",
+        # 隐私合规候选（门控 A + B 共现）；不直接计入 comments/summary，
+        # 交由 LLM 在 Step 8 做门控 C 语义确认后再决定是否贴 P0 inline。
+        "privacy_candidates": [],
     }
 
     # 关联 CR
@@ -91,24 +101,71 @@ def analyse_cr(cr_num):
              for r in peers if r["_number"] != int(cr_num)]
         )
 
-    # Jira 缺失硬规则
-    if not result["jira"]:
-        result["comments"].setdefault("/COMMIT_MSG", []).append({
-            "line": 1, "level": "P0",
-            "message": "缺 Jira 关联号。请在 subject 或 commit message 中补充 CHYT1V-xxx / BAIC-xxx / KP31-xxx 等格式的 Jira 号，便于追溯。"
-        })
-        result["summary"]["P0"] += 1
+    # Jira 合规性检测（三类不合规：缺失 / 占位号 / 纯数字）
+    jira_text = subj + "\n" + commit_msg
+    jira_violations = extract_jira_violations(jira_text)
+    result["jira_violations"] = jira_violations
 
-    # 扫 diff
+    if not result["jira"]:
+        if jira_violations:
+            # 有 Jira 号但全部不合规（占位号或纯数字）
+            for v in jira_violations:
+                result["comments"].setdefault("/COMMIT_MSG", []).append({
+                    "line": 1, "level": "P0",
+                    "message": (
+                        f"Jira 号不合规（{v['type']}）：{v['raw']}。{v['detail']}\n\n"
+                        "合规格式：CHYT1V-1234 / BAIC-567 / KP31-89 / FL1-12 / FL2-34 / FL3-56 / "
+                        "T1V-78 / D01-90 / CHYT12A-11 / CHYMIFA-22 等（数字部分须为非零起始正整数）。"
+                    ),
+                    "rule": f"R.JIRA_{v['type'].upper()}",
+                })
+                result["summary"]["P0"] += 1
+        else:
+            # 完全没有任何 Jira 相关内容
+            result["comments"].setdefault("/COMMIT_MSG", []).append({
+                "line": 1, "level": "P0",
+                "message": (
+                    "缺 Jira 关联号。请在 subject 或 commit message 中补充合规格式的 Jira 号，便于追溯。\n\n"
+                    "合规前缀：CHYT1V / BAIC / KP31 / FL1 / FL2 / FL3 / T1V / D01 / CHYT12A / CHYMIFA\n"
+                    "合规格式：<前缀>-<非零起始正整数>，如 CHYT1V-1234。\n"
+                    "不合规示例：纯数字（如 123456）、占位号（如 CHYT1V-000 / CHYT1V-0001）。"
+                ),
+                "rule": "R.JIRA_MISSING",
+            })
+            result["summary"]["P0"] += 1
+    elif jira_violations:
+        # 有合规 Jira 号，但同时存在不合规号 → P1 提醒
+        for v in jira_violations:
+            result["comments"].setdefault("/COMMIT_MSG", []).append({
+                "line": 1, "level": "P1",
+                "message": (
+                    f"检测到不合规 Jira 引用（{v['type']}）：{v['raw']}。{v['detail']}\n"
+                    "已识别到合规 Jira 号，此条仅作提醒。"
+                ),
+                "rule": f"R.JIRA_{v['type'].upper()}_WARN",
+            })
+            result["summary"]["P1"] += 1
+
+    # 扫 diff（变量注解使用兼容 Python 3.6 的写法：不使用 PEP 585 下标注解）
+    added_by_file = {}      # type: dict
+    context_by_file = {}    # type: dict
     for fn, meta in files.items():
         if fn == "/COMMIT_MSG":
             continue
         dd = get_file_diff(cr_num, cur, fn)
         if not isinstance(dd, dict):
             continue
+        added = []   # type: list
+        full = []    # type: list
         for old_line, new_line, kind, text in iter_diff_lines(dd):
+            if kind in ("add", "ctx") and new_line:
+                if len(full) < new_line:
+                    full.extend([""] * (new_line - len(full)))
+                full[new_line - 1] = text
             if kind != "add":
                 continue
+            if new_line:
+                added.append((new_line, text))
             hits = scan_line(text)
             for h in hits:
                 result["comments"].setdefault(fn, []).append({
@@ -118,6 +175,18 @@ def analyse_cr(cr_num):
                     "rule": h["rule"],
                 })
                 result["summary"][h["level"]] += 1
+        if added:
+            added_by_file[fn] = added
+            context_by_file[fn] = full
+
+    # 隐私合规候选扫描（门控 A + B 共现；门控 C 留给 LLM）
+    if _privacy_scan_diff is not None and added_by_file:
+        try:
+            result["privacy_candidates"] = _privacy_scan_diff(
+                added_by_file, context_by_file,
+            )
+        except Exception as e:
+            result["privacy_candidates"] = [{"error": f"privacy_scan failed: {e}"}]
 
     # 同文件内一致性扫描（车载中间件最高发的硬不一致）
     if scan_consistency:
@@ -156,9 +225,14 @@ def analyse_cr(cr_num):
         result["suggested_score"] = 1
 
     # 默认 cover（LLM 应覆盖）
+    privacy_cand_total = sum(
+        len(pf.get("candidates", [])) for pf in result.get("privacy_candidates", [])
+        if isinstance(pf, dict)
+    )
     parts = [
         f"机械规则扫描结果（Jira: {', '.join(result['jira']) or '无'}）：",
         f"P0={s['P0']}, P1={s['P1']}, P2={s['P2']}, P3={s['P3']}",
+        f"隐私合规候选（待 LLM 做门控 C 确认）：{privacy_cand_total}",
         "（以上仅为硬规则命中项；架构/功能/时序类问题需 LLM 补充）",
     ]
     result["cover"] = "\n".join(parts)
