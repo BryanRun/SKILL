@@ -1,6 +1,6 @@
 # gerrit-pipeline — 使用说明
 
-**版本：v1.6.2**
+**版本：v1.6.3**
 
 gerrit-pipeline 是一个 Claude Code Skill，为车联 AutoLink 团队提供 Gerrit 代码提交评审一站式自动化能力。只需一句指令，即可完成从代码提交、自动评审、Checklist 贴回到飞书群通知的完整流水线，也支持每个步骤独立执行。目标是减少重复操作、统一提交规范、加速 Code Review 闭环。
 
@@ -8,7 +8,7 @@ gerrit-pipeline 是一个 Claude Code Skill，为车联 AutoLink 团队提供 Ge
 
 ```
 Step 1: 代码提交    → 生成规范 commit message + push 到 Gerrit
-Step 2: 代码评审    → 六维自动评审 + 结果贴回 Gerrit
+Step 2: 代码评审    → 七维自动评审 + 结果贴回 Gerrit
 Step 3: Checklist  → AutoLink Code Review Checklist v2.0 贴到 Gerrit
 Step 4: 飞书通知    → 发送评审结果卡片到飞书群，@审核人
 ```
@@ -17,7 +17,7 @@ Step 4: 飞书通知    → 发送评审结果卡片到飞书群，@审核人
 
 ### 2.1 前置条件
 
-1. **安装 enhanced_code_review skill**：Step 2（代码评审）依赖此 skill 提供六维自动评审能力。请将其解压到 `~/.claude/skills/enhanced_code_review/` 目录下，否则评审步骤无法执行。
+1. **安装 enhanced_code_review skill**：Step 2（代码评审）依赖此 skill 提供七维自动评审能力。请将其解压到 `~/.claude/skills/enhanced_code_review/` 目录下，否则评审步骤无法执行。
 2. **飞书机器人入群**：在目标飞书群中添加名为 **WALL-E** 的机器人（群设置 → 群机器人 → 添加机器人 → 搜索「WALL-E」），否则无法发送通知。
 
 ### 2.2 方式一：Claude Code 快速配置（推荐）
@@ -141,7 +141,7 @@ Claude 会按 Step 1 → 2 → 3 → 4 顺序自动执行全部步骤。
 1. Python 3.6+
 2. `requests` 库（`pip install requests`）
 3. Gerrit SSH 访问权限（用于 git push）
-5. **enhanced_code_review skill**：Step 2（代码评审）依赖此 skill 提供六维自动评审能力，需同步安装到 `~/.claude/skills/` 目录下
+5. **enhanced_code_review skill**：Step 2（代码评审）依赖此 skill 提供七维自动评审能力，需同步安装到 `~/.claude/skills/` 目录下
 
 > Step 1（代码提交）、Step 3（Checklist）、Step 4（飞书通知）为内置能力，无额外 skill 依赖。
 
@@ -165,6 +165,7 @@ Claude 会按 Step 1 → 2 → 3 → 4 顺序自动执行全部步骤。
 
 | 版本 | 日期 | 变更摘要 |
 |------|------|---------|
+| v1.6.3 | 2026-05-01 | 1. Step 2 评审范围限制：仅评审修改代码及强相关代码，排除无关历史代码<br>2. 六维评审升级为七维评审，新增隐私合规维度 |
 | v1.6.2 | 2026-05-01 | 1. Step 2 评审结论为必需项：必须完整展示给用户并贴回 Gerrit，不可跳过 |
 | v1.6.1 | 2026-05-01 | 1. 严格区分 Step 2 评审结论与 Step 3 Checklist，严禁混淆或合并<br>2. Checklist 内容完全固化，只能标注状态（✓/x/o），禁止修改检查项文字<br>3. Checklist 必须完整展示，禁止省略或截断 |
 | v1.6.0 | 2026-05-01 | 1. 【体现版本】字段自动填当日日期，格式固定为 `After YYYY/M/D`<br>2. 【提交项目/分支】字段简化为仅填分支名<br>3. Checklist 确认环节责任声明固化<br>4. Checklist 模板固化不可变更 |

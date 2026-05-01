@@ -47,7 +47,7 @@ description: >-
 ```
 Step 1: gerrit-submit        → 生成 commit message + git push → 获得 CR 编号
           ↓
-Step 2: enhanced_code_review → review CR <编号> → 六维评审 + 贴回 Gerrit
+Step 2: enhanced_code_review → review CR <编号> → 七维评审 + 贴回 Gerrit
           ↓
 Step 3: 贴 Checklist          → 将 AutoLink Code Review Checklist v2.0 贴到 Gerrit
           ↓
@@ -517,9 +517,18 @@ Skill({ skill: "enhanced_code_review", args: "review CR <CR编号>" })
 
 **多仓库关联提交场景**：对 Step 1 产出的每个 CR 依次执行评审，逐个调用上述命令。每个 CR 独立产出评审评分和问题列表。
 
+### 评审范围限制
+
+**仅针对本次修改的代码及与修改点强相关的代码进行评审**，与修改无关的历史代码不在评审范围内：
+
+- ✅ 本次 diff 中新增、修改、删除的代码
+- ✅ 与修改点存在直接调用、依赖或逻辑关联的上下文代码
+- ❌ diff 上下文中展示但与本次修改无关的历史代码
+- ❌ 未修改文件中的既有问题
+
 ### 本步骤完成标志
 
-- 六维评审完成
+- 七维评审完成
 - **评审结论必须完整展示给用户**（评审评分、P0-P3 问题统计、具体问题列表）
 - **评审结论必须贴回到 Gerrit**（cover message + inline comments），这是必需项，不可跳过
 - 获取评审评分（+1 / 0 / -1）和发现的问题列表
@@ -942,6 +951,11 @@ cd <skill_dir>/scripts && python3 feishu_notify.py \
 
 ## 版本历史
 
+### v1.6.3（2026/5/1）
+
+1. **Step 2 评审范围限制**：仅针对本次修改的代码及与修改点强相关的代码进行评审，排除无关历史代码
+2. **六维评审升级为七维评审**：匹配 enhanced_code_review v2.1.2，新增第 7 维「隐私合规」
+
 ### v1.6.2（2026/5/1）
 
 1. **Step 2 评审结论为必需项**：评审结论必须完整展示给用户（评分+P0-P3+问题列表），且必须贴回 Gerrit，不可跳过
@@ -963,14 +977,42 @@ cd <skill_dir>/scripts && python3 feishu_notify.py \
 
 - 新增 `gp` 触发快捷方式
 
+### v1.5.0
+
+1. **【开发自测视频】字段改为可选**：由用户交互选择是否添加
+2. **Commit message 严格符合模板**：禁止 Co-Authored-By 等模板外多余行
+3. **Step 3 与 Step 4 之间新增确认步骤**：确保 Gerrit 门禁通过后再发送飞书通知
+
 ### v1.4.0
 
 - 内置公共飞书应用凭证，无需额外配置
 
 ### v1.3.1
 
-- 新增 Topic（多仓库关联提交）支持
+- 飞书通知卡片中 Topic 改为可点击的 Gerrit 链接，跳转到 topic 搜索页
+
+### v1.3.0
+
+1. **新增 Topic（多仓库关联提交）完整规范**：支持命名规则、【x/y】关联标识、提交顺序约束、合入纪律
+2. **新增 Topic 名称格式校验脚本**
+3. **交互流程每次询问是否为关联提交**：自动扫描有变更的仓库，支持 multiSelect 确认
+4. **多仓库场景下 Step 2/3 逐 CR 执行，Step 4 汇总通知**
 
 ### v1.2.0
 
-- commit message body 字段新增 50 字最大长度约束
+1. **Commit message body 各字段新增 50 字上限约束**
+2. **校验脚本同步增加最大字数检查**
+
+### v1.1.0
+
+1. **融合 gerrit-submit 为内置能力**：Step 1 不再依赖外部 skill
+2. **通知卡片新增提交人字段并 @mention**
+3. **新增 `feishu.submitter` 配置项**
+
+### v1.0.0
+
+1. **首次发布**
+2. **四步流水线**：代码提交 → 评审 → Checklist → 飞书通知
+3. **每步支持独立操作**
+4. **配置化**：用户私有 config.json
+5. **飞书通知 @mention 审核人**
