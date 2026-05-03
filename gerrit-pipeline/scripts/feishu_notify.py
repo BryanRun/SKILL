@@ -20,6 +20,7 @@
 """
 import os, sys, json, time, argparse
 import requests
+from pipeline_config import resolve_config
 
 BASE_URL = "https://open.feishu.cn/open-apis"
 CONFIG_PATH = os.path.expanduser("~/.config/gerrit-pipeline/config.json")
@@ -28,13 +29,6 @@ _token_cache = {"token": None, "expire_at": 0}
 
 FEISHU_APP_ID = "cli_a97aeb96793a9bc1"
 FEISHU_APP_SECRET = "01ArKkBCEZsBDks8v227YeSpVGoIpax4"
-
-
-def load_config():
-    if not os.path.exists(CONFIG_PATH):
-        return None
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
 
 
 def get_tenant_token():
@@ -139,6 +133,10 @@ def build_single_card(args, at_members=None, submitter=None):
     elements = [
         {
             "tag": "div",
+            "text": {"tag": "lark_md", "content": f"**提交概要**\n[{args.subject}]({args.url})"},
+        },
+        {
+            "tag": "div",
             "fields": [
                 {"is_short": True, "text": {"tag": "lark_md", "content": f"**CR 编号**\n[{args.cr}]({args.url})"}},
                 {"is_short": True, "text": {"tag": "lark_md", "content": f"**分支**\n{args.branch}"}},
@@ -157,10 +155,6 @@ def build_single_card(args, at_members=None, submitter=None):
                 {"is_short": True, "text": {"tag": "lark_md", "content": f"**Checklist**\n{checklist_display}"}},
                 {"is_short": True, "text": {"tag": "lark_md", "content": f"**问题统计**\n{issues}"}},
             ],
-        },
-        {
-            "tag": "div",
-            "text": {"tag": "lark_md", "content": f"**提交概要**\n{args.subject}"},
         },
     ]
 
@@ -226,11 +220,17 @@ def build_topic_card(args, at_members=None, submitter=None):
         cr_lines.append(f"- **{repo}**: [{cr}]({url})")
     cr_text = "\n".join(cr_lines)
 
+    topic_url = f"https://gerrit.auto-link.com.cn/q/topic:{args.topic}"
+
     elements = [
         {
             "tag": "div",
+            "text": {"tag": "lark_md", "content": f"**提交概要**\n[{args.subject}]({topic_url})"},
+        },
+        {
+            "tag": "div",
             "fields": [
-                {"is_short": True, "text": {"tag": "lark_md", "content": f"**Topic**\n[{args.topic}](https://gerrit.auto-link.com.cn/q/topic:{args.topic})"}},
+                {"is_short": True, "text": {"tag": "lark_md", "content": f"**Topic**\n[{args.topic}]({topic_url})"}},
                 {"is_short": True, "text": {"tag": "lark_md", "content": f"**分支**\n{args.branch}"}},
             ],
         },
@@ -247,10 +247,6 @@ def build_topic_card(args, at_members=None, submitter=None):
                 {"is_short": True, "text": {"tag": "lark_md", "content": f"**Checklist**\n{checklist_display}"}},
                 {"is_short": True, "text": {"tag": "lark_md", "content": f"**问题统计**\n{issues}"}},
             ],
-        },
-        {
-            "tag": "div",
-            "text": {"tag": "lark_md", "content": f"**提交概要**\n{args.subject}"},
         },
         {
             "tag": "div",
@@ -302,15 +298,19 @@ def main():
     ap.add_argument("--p2", type=int, default=0, help="P2 问题数")
     ap.add_argument("--p3", type=int, default=0, help="P3 问题数")
     ap.add_argument("--checklist", default="pass", choices=["pass", "warn", "fail"], help="Checklist 状态")
+    ap.add_argument("--project", default=None, help="项目名称（如 D01、BAIC），用于匹配项目专属配置")
     ap.add_argument("--chat-id", default=None, help="飞书群 chat_id（覆盖配置文件）")
     ap.add_argument("--dry", action="store_true", help="仅预览，不实际发送")
     args = ap.parse_args()
 
-    cfg = load_config()
+    cfg, matched_project = resolve_config(args.project)
     if not cfg:
         print(f"错误: 配置文件不存在: {CONFIG_PATH}", file=sys.stderr)
         print("请先运行: python3 pipeline_config.py init", file=sys.stderr)
         sys.exit(1)
+
+    if matched_project:
+        print(f"匹配项目配置: {matched_project}")
 
     feishu_cfg = cfg.get("feishu", {})
     chat_id = args.chat_id or feishu_cfg.get("chat_id")

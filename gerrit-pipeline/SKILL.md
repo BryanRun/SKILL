@@ -16,6 +16,11 @@ description: >-
 
 ## 触发条件
 
+> **⚠️ 关于触发方式的说明**：
+> - **最具确定性的调用方式**：`/gerrit-pipeline`（斜杠命令，精确触发）
+> - **自然语言触发词**（如下所列）均依赖 AI 语义匹配，**无法保证 100% 命中**
+> - 如遇触发失败，请使用 `/gerrit-pipeline` 斜杠命令
+
 ### 完整流水线
 
 以下任一表述触发完整四步流水线：
@@ -281,11 +286,11 @@ echo "$msg" | tail -n +2 | while IFS= read -r line; do
 done
 ```
 
-### 1.4 推送工作流
+### 1.5 推送工作流
 
 #### 新建 Change（标准提交）
 
-Reviewer 列表从配置文件 `~/.config/gerrit-pipeline/config.json` 的 `gerrit.reviewers` 字段读取，自动拼接为 `%r=reviewer1,r=reviewer2` 格式。
+Reviewer 列表从配置文件 `~/.config/gerrit-pipeline/config.json` 读取。如配置了 `projects`，则根据用户选择的项目名匹配项目专属的 `gerrit.reviewers`，未匹配时 fallback 到顶层 `gerrit.reviewers`。自动拼接为 `%r=reviewer1,r=reviewer2` 格式。
 
 ```bash
 # 推送到目标分支的 review 队列，自动添加配置中的 reviewer
@@ -305,13 +310,14 @@ git push autolink HEAD:refs/for/al_chery-d01_dev2%r=reviewer1,r=reviewer2,topic=
 **完整流程**：
 
 1. 确认当前分支和目标分支
-2. 读取配置文件中的 `gerrit.reviewers` 列表
-3. 执行提交前检查（编译 + 单元测试）
-4. `git add` 暂存变更文件
-5. `git commit` 提交（使用规范化的 commit message）
-6. 本地校验 commit message 格式
-7. `git push autolink HEAD:refs/for/{目标分支}%r={reviewer1},r={reviewer2}`
-8. 输出 Gerrit Change 链接
+2. 如配置了 `projects`，通过 AskUserQuestion 让用户选择本次提交所属项目（只有一个项目时自动选中，无 `projects` 配置时跳过）
+3. 读取配置文件中的 `gerrit.reviewers` 列表（根据所选项目匹配专属配置，未选择时使用顶层默认值）
+4. 执行提交前检查（编译 + 单元测试）
+5. `git add` 暂存变更文件
+6. `git commit` 提交（使用规范化的 commit message）
+7. **强制校验 commit message**（详见 1.6 节），校验���通过则自动修正并重试，最多 3 次，3 次仍不通过则中止流水线
+8. `git push autolink HEAD:refs/for/{目标分支}%r={reviewer1},r={reviewer2}`
+9. 输出 Gerrit Change 链接
 
 #### Amend 追加 Patchset
 
@@ -355,7 +361,93 @@ git checkout {原分支}
 - 如果 cherry-pick 多个 commit，逐个操作并分别推送
 - 冲突解决后需确认 commit message 格式仍符合规范
 
-### 1.6 交互式辅助流程
+### 1.6 Commit Message 强制校验（校验-修正-重试闭环）
+
+> **本节定义的校验流程为强制步骤，commit 后、push 前必须执行，不可跳过。**
+
+#### 执行时机
+
+在以下所有场景中，**git commit 成功之后、git push 之前**，必须执行本校验流程：
+
+- 标准提交（新建 Change）
+- Amend 追加 Patchset
+- Cherry-pick 到其他分支
+- 多仓库关联提交（每个仓库 commit 后均需校验）
+
+#### 校验流程
+
+```
+git commit 完成
+      ↓
+运行校验脚本（1.4 节中的全部校验项）
+      ↓
+  校验通过？ ──是──→ 继续 git push
+      ↓ 否
+展示校验错误给用户
+      ↓
+Claude 自动修正 commit message
+      ↓
+git commit --amend（仅修正 message，不改变代码）
+      ↓
+重新运行校验脚本
+      ↓
+（循环，最多 3 次）
+      ↓
+3 次仍不通过 → 中止流水线，向用户报告所有校验错误
+```
+
+#### 校验项清单
+
+每次校验必须**逐项检查**以下所有规则（对应 1.4 节校验脚本）：
+
+| # | 校验项 | 判定规则 | 失败严重性 |
+|---|--------|---------|-----------|
+| 1 | 标题格式 | 以 `【bug】`、`【change】` 或 `【feature】` 开头 | 阻塞 |
+| 2 | JIRA-ID | 标题中包含有效 JIRA ticket 编号，用 `【】` 包裹 | 阻塞 |
+| 3 | 【x/y】标识 | 如存在，x、y 为正整数，x ≤ y，`【】` 为中文方括号 | 阻塞 |
+| 4 | 标题与 body 之间空行 | 标题之后必须有一个空行再接 body | 阻塞 |
+| 5 | 【原因分析】 | 存在且 8~50 字 | 阻塞 |
+| 6 | 【解决方案】 | 存在且 8~50 字 | 阻塞 |
+| 7 | 【自测用例】 | 存在且 20~50 字 | 阻塞 |
+| 8 | 【自测方法】 | 存在且 4~50 字 | 阻塞 |
+| 9 | 【影响范围】 | 存在且 ≤50 字 | 阻塞 |
+| 10 | 【代码修改量】 | 存在且 ≤50 字 | 阻塞 |
+| 11 | 【提交项目/分支】 | 存在且 ≤50 字 | 阻塞 |
+| 12 | 【体现版本】 | 存在且格式为 `After YYYY/M/D`（如 `After 2026/5/2`） | 阻塞 |
+| 13 | 【开发自测视频】 | 如存在，内容必须为固定值 | 阻塞 |
+| 14 | 无模板外多余行 | body 中不得有 Co-Authored-By、Signed-off-by 等模板外行（Change-Id 行除外） | 阻塞 |
+| 15 | 字段顺序 | body 各字段必须按模板定义的顺序排列 | 阻塞 |
+
+#### 自动修正规则
+
+当校验失败时，Claude 按以下规则自动修正，**无需再次询问用户**：
+
+| 错误类型 | 自动修正方式 |
+|---------|------------|
+| 字段内容不足最低字数 | 根据 `git diff --staged` 重新生成该字段内容，确保达到最低字数 |
+| 字段内容超过 50 字上限 | 精简该字段内容至 50 字以内 |
+| 缺少必填字段 | 根据 diff 和上下文补充缺失字段 |
+| 【体现版本】格式错误 | 替换为当日日期 `After YYYY/M/D` |
+| 存在模板外多余行 | 删除多余行（如 Co-Authored-By、Signed-off-by 等） |
+| 字段顺序错误 | 按模板定义的顺序重新排列 |
+| 标题与 body 之间缺少空行 | 插入空行 |
+
+修正完成后使用 `git commit --amend` 更新 commit message（仅修正 message 内容，不改变已暂存的代码变更），然后重新执行校验。
+
+#### 重试限制
+
+- **最多重试 3 次**（含首次校验共 4 次校验机会）
+- 3 次自动修正后仍不通过，**中止流水线**
+- 向用户报告：
+  1. 当前 commit message 全文
+  2. 仍然存在的所有校验错误
+  3. 建议用户手动修正后重新触发流水线
+
+#### 校验通过标志
+
+校验脚本输出无任何 `ERROR` 行，即视为校验通过。校验通过后方可执行 `git push`。
+
+### 1.7 交互式辅助流程
 
 当用户触发提交流程时，Claude 按以下步骤辅助。根据是否为关联提交，分为两条路径。
 
@@ -385,7 +477,7 @@ git checkout {原分支}
 5. 展示给用户确认后提交
 
 **推送确认**：
-- 确认目标分支、Reviewer 列表（从配置文件 `gerrit.reviewers` 读取）
+- 确认目标分支、Reviewer 列表（根据所选项目匹配配置）
 - 执行 git commit + git push
 - 提取 CR 编号
 
@@ -446,7 +538,7 @@ repo forall -c 'if [ -n "$(git status --porcelain)" ]; then echo "$(pwd)"; fi'
 - 所有 CR 共享同一 topic
 - 汇总输出：各仓库的 CR 编号、URL、提交顺序
 
-### 1.7 常用命令速查
+### 1.8 常用命令速查
 
 | 操作 | 命令 |
 |------|------|
@@ -458,7 +550,7 @@ repo forall -c 'if [ -n "$(git status --porcelain)" ]; then echo "$(pwd)"; fi'
 | 检查 commit-msg hook | `ls -la .git/hooks/commit-msg` |
 | 搜索 topic 是否唯一 | Gerrit 搜索 `topic:{topic名称}` |
 
-### 1.8 注意事项
+### 1.9 注意事项
 
 1. **永远不要 `--no-verify`**：commit-msg hook 负责生成 Change-Id，跳过会导致推送失败
 2. **amend vs 新 commit**：修改已推送的 Change 用 amend；新的独立改动用新 commit
@@ -476,6 +568,7 @@ repo forall -c 'if [ -n "$(git status --porcelain)" ]; then echo "$(pwd)"; fi'
   - **Change URL**：完整的 Gerrit Change 链接
   - **提交标题**：commit message 的第一行
   - **目标分支**：push 的目标分支名
+  - **项目名称**：用户选择的项目名（如 `D01`），供 Step 4 飞书通知匹配项目配置
 - **关联提交场景**：所有仓库均 push 成功，汇总所有 CR 编号。后续步骤（评审、Checklist、飞书通知）对每个 CR 分别执行
 
 ### 提取 CR 编号的方法
@@ -525,6 +618,80 @@ Skill({ skill: "enhanced_code_review", args: "review CR <CR编号>" })
 - ✅ 与修改点存在直接调用、依赖或逻辑关联的上下文代码
 - ❌ diff 上下文中展示但与本次修改无关的历史代码
 - ❌ 未修改文件中的既有问题
+
+### 评审结论贴回校验（Pipeline 兜底）
+
+> **本子步骤为强制步骤，不可跳过。** enhanced_code_review 可能因 Gerrit self-review 限制或其他原因未能将评审结论贴回 Gerrit。Pipeline 必须校验并确保评审结论已贴回。
+
+#### 触发条件
+
+enhanced_code_review skill 执行完成后，无论其是否报告贴回成功，Pipeline 均需执行本校验。
+
+#### 校验流程
+
+```
+enhanced_code_review 执行完成
+      ↓
+调用 gerrit_post_review.py --check-only 检查评审结论是否已贴回
+      ↓
+  已贴回？ ──是──→ 继续 Step 3
+      ↓ 否
+Claude 将评审结论（cover message）写入临时文件
+      ↓
+调用 gerrit_post_review.py 贴回评审结论（不带 Code-Review label）
+      ↓
+  贴回成功？ ──是──→ 继续 Step 3
+      ↓ 否
+重试（最多 2 次）
+      ↓
+仍失败 → 中止流水线，向用户报告错误
+```
+
+#### 执行方式
+
+**Step 1：检查评审结论是否已贴回**
+
+```bash
+cd <skill_dir>/scripts && python3 gerrit_post_review.py \
+  --cr <CR编号> \
+  --check-only
+```
+
+- 退出码 `0`：评审结论已贴回，跳过后续操作
+- 退出码 `1`：评审结论未贴回，执行 Step 2
+
+**Step 2：贴回评审结论（不带 Code-Review label）**
+
+Claude 将 enhanced_code_review 产出的评审结论（包含评审评分建议、P0-P3 问题统计、具体问题列表）写入临时文件，然后调用脚本贴回：
+
+```bash
+# 方式一：从文件读取评审结论
+cd <skill_dir>/scripts && python3 gerrit_post_review.py \
+  --cr <CR编号> \
+  --review /tmp/review_result.txt
+
+# 方式二：直接传入文本
+cd <skill_dir>/scripts && python3 gerrit_post_review.py \
+  --cr <CR编号> \
+  --review-text "<评审结论文本>"
+```
+
+其中 `<skill_dir>` 为本 skill 的安装路径。
+
+#### 评审结论内容要求
+
+由 Pipeline 贴回的评审结论必须包含以下完整信息（与 enhanced_code_review 原始输出一致）：
+
+- 评审评分建议（suggested_score: +1 / 0 / -1）
+- P0/P1/P2/P3 问题统计
+- 具体问题列表（如有）
+- 各维度评审摘要
+
+**禁止**：简化、截断或仅贴部分评审结论。
+
+#### 多仓库关联提交场景
+
+对 Step 1 产出的每个 CR，均需独立执行本校验。任一 CR 的评审结论未能贴回，视为该 CR 的 Step 2 未完成。
 
 ### 本步骤完成标志
 
@@ -717,23 +884,81 @@ Claude 根据 Step 2 的评审结果和实际情况，自动标注每项：
 
 ### 首次使用引导
 
-如果配置文件不存在，Claude 引导用户完成初始化：
+当用户输入 `配置 gerrit-pipeline` 或配置文件不存在时，Claude 按以下流程引导用户完成全部配置：
 
-1. 提示用户运行 `python3 pipeline_config.py init`
-2. 收集飞书群 chat_id
-3. 收集 @mention 成员邮箱
-4. 自动查询飞书 open_id 并保存到配置
+#### 第一阶段：基础配置
 
-也可通过 Claude 直接收集信息后调用脚本完成配置：
+通过 AskUserQuestion 逐步收集以下信息：
+
+1. **Gerrit 用户名**
+2. **Gerrit HTTP 密码**（在 Gerrit Settings → HTTP Credentials 中生成）
+3. **默认 Reviewer 列表**（逗号分隔）
+4. **飞书群 chat_id**（目标通知群的 ID）
+5. **提交人邮箱**（用于查询提交人的飞书 open_id，通知卡片中 @提交人）
+6. **@mention 审核人邮箱**（逗号分隔）
+
+收集完成后，Claude 调用脚本自动查询飞书 open_id 并保存配置：
 
 ```bash
-# 查询成员 open_id
-cd <skill_dir>/scripts && python3 pipeline_config.py lookup-users \
-  --emails "user1@auto-link.com.cn,user2@auto-link.com.cn" --save
+cd <skill_dir>/scripts
 
-# 查看当前配置
-python3 pipeline_config.py show
+# 初始化基础配置
+python3 pipeline_config.py init
+
+# 查询提交人 open_id
+python3 pipeline_config.py lookup-users --emails "submitter@auto-link.com.cn"
+
+# 查询审核人 open_id 并保存
+python3 pipeline_config.py lookup-users \
+  --emails "user1@auto-link.com.cn,user2@auto-link.com.cn" --save
 ```
+
+#### 第二阶段：按项目配置（可选）
+
+基础配置完成后，Claude 主动询问用户：
+
+> 你是否负责多个项目，需要按项目区分飞书通知群、审核人或 Reviewer？
+
+**选项**（通过 AskUserQuestion 展示）：
+
+| 选项 | 行为 |
+|------|------|
+| 需要，配置项目 | 进入项目配置流程 |
+| 不需要，使用默认配置即可 | 跳过，配置完成 |
+
+如果用户选择「需要」，Claude 循环收集每个项目的配置：
+
+1. **项目名称**（如 `D01`、`BAIC`）
+2. **项目专属飞书群 chat_id**（不填则继承顶层默认）
+3. **项目专属 Reviewer 列表**（不填则继承顶层默认）
+4. **项目专属 @mention 审核人邮箱**（不填则继承顶层默认）
+
+每个项目收集完成后调用：
+
+```bash
+python3 pipeline_config.py add-project \
+  --name "D01" \
+  --chat-id "oc_xxx" \
+  --reviewers "reviewer1,reviewer2" \
+  --at-emails "user1@auto-link.com.cn,user2@auto-link.com.cn"
+```
+
+然后询问「是否继续添加其他项目」，用户选择「否」时结束配置流程。
+
+#### 查看与管理配置
+
+```bash
+# 查看当前完整配置
+python3 pipeline_config.py show
+
+# 查看所有项目配置
+python3 pipeline_config.py list-projects
+
+# 删除项目配置
+python3 pipeline_config.py remove-project --name "D01"
+```
+
+配置 `projects` 后，Pipeline 在 Step 1 中会通过 AskUserQuestion 让用户选择本次提交所属项目，匹配的项目配置自动覆盖顶层默认值。未配置 `projects` 时使用顶层默认配置，行为与单项目场景完全一致。
 
 ### 执行方式
 
@@ -744,8 +969,9 @@ python3 pipeline_config.py show
 cd <skill_dir>/scripts && python3 feishu_notify.py \
   --cr <CR编号> \
   --url "<Gerrit Change URL>" \
-  --branch <目标分支> \
+  --branch <���标分支> \
   --subject "<提交标题>" \
+  --project "<项目名称>" \
   --score <评审评分> \
   --p0 <P0数> --p1 <P1数> --p2 <P2数> --p3 <P3数> \
   --checklist <pass|warn|fail>
@@ -757,14 +983,15 @@ cd <skill_dir>/scripts && python3 feishu_notify.py \
   --url "<URL1>,<URL2>,..." \
   --branch <目标分支> \
   --subject "<共享概要描述>" \
+  --project "<项目名称>" \
   --score <最低评审评分> \
   --p0 <P0总数> --p1 <P1总数> --p2 <P2总数> --p3 <P3总数> \
   --checklist <pass|warn|fail>
 ```
 
-其中 `<skill_dir>` 为本 skill 的安装路径（如 `~/.claude/skills/gerrit-pipeline`）。
+其中 `<skill_dir>` 为本 skill 的安装路径（如 `~/.claude/skills/gerrit-pipeline`）。`<项目名称>` 为 Step 1 中用户选择的项目名（如 `D01`）。
 
-脚本自动从 `~/.config/gerrit-pipeline/config.json` 读取 chat_id 和 at_members。
+脚本根据 `--project` 参数精确匹配 `~/.config/gerrit-pipeline/config.json` 中 `projects` 的 key，使用对应的项目专属配置（chat_id、at_members），未匹配或未传 `--project` 时使用顶层默认配置。
 
 ### 参数说明
 
@@ -777,6 +1004,7 @@ cd <skill_dir>/scripts && python3 feishu_notify.py \
 | `--score` | 否 | 评审评分 -1/0/1（默认 1） | Step 2 输出 |
 | `--p0` ~ `--p3` | 否 | 各级别问题数（默认 0） | Step 2 输出 |
 | `--checklist` | 否 | Checklist 状态 pass/warn/fail（默认 pass） | Step 3 输出 |
+| `--project` | 否 | 项目名称（如 `D01`），匹配项目专属的 chat_id 和 at_members | Step 1 输出 |
 | `--topic` | 否 | Topic 名称（多仓库关联提交时必填） | Step 1 输出 |
 | `--repos` | 否 | 各 CR 对应仓库名，逗号分隔（多仓库时必填，与 --cr 一一对应） | Step 1 输出 |
 | `--chat-id` | 否 | 飞书群 ID（覆盖配置文件中的值） | — |
@@ -788,14 +1016,68 @@ cd <skill_dir>/scripts && python3 feishu_notify.py \
 
 ```json
 {
+  "gerrit": {
+    "user": "your_gerrit_username",
+    "http_password": "your_gerrit_http_password",
+    "reviewers": ["reviewer1", "reviewer2"]
+  },
   "feishu": {
-    "chat_id": "oc_xxxxxxxx",
+    "chat_id": "oc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "submitter": {"name": "你的姓名", "open_id": "ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
     "at_members": [
       {"name": "审核人A", "open_id": "ou_xxxxxxxx"},
       {"name": "审核人B", "open_id": "ou_xxxxxxxx"}
     ]
+  },
+  "projects": {
+    "D01": {
+      "gerrit": { "reviewers": ["专属reviewer1", "专属reviewer2"] },
+      "feishu": { "chat_id": "oc_D01群ID", "at_members": [{"name": "王五", "open_id": "ou_xxx"}] }
+    },
+    "BAIC": {
+      "feishu": { "chat_id": "oc_BAIC群ID" }
+    }
   }
 }
+```
+
+**配置项说明**：
+
+| 配置项 | 说明 |
+|--------|------|
+| `gerrit.user` | Gerrit 用户名 |
+| `gerrit.http_password` | Gerrit HTTP 密码（在 Gerrit Settings → HTTP Credentials 中生成） |
+| `gerrit.reviewers` | 默认 Reviewer 列表（push 时自动添加） |
+| `feishu.chat_id` | 默认飞书通知群 ID |
+| `feishu.submitter` | 提交人信息（name + open_id），通知卡片中 @提交人 |
+| `feishu.at_members` | 默认飞书 @mention 审核人列表（name + open_id） |
+| `projects` | 按项目差异化配置（可选，不配置时使用顶层默认值） |
+| `projects.<项目名>.gerrit.reviewers` | 项目专属 Reviewer 列表，覆盖顶层 |
+| `projects.<项目名>.feishu.chat_id` | 项目专属飞书群 ID，覆盖顶层 |
+| `projects.<项目名>.feishu.at_members` | 项目专属 @mention 审核人，覆盖顶层 |
+
+**projects 匹配规则**：
+- `projects` 为可选字段，不配置时所有项目使用顶层默认配置（向后兼容）
+- key 为项目名称（如 `D01`、`BAIC`），由用户在 Step 1 交互时选择
+- value 中的 `gerrit` 和 `feishu` 字段**覆盖**顶层对应字段，未配置的字段 fallback 到顶层
+- 同一仓库可属于多个项目，每次提交时由用户选择当前所属项目
+- 只有一个项目时自动选中，无 `projects` 配置时跳过选择
+
+**项目配置管理命令**：
+
+```bash
+# 添加或更新项目配置
+cd <skill_dir>/scripts && python3 pipeline_config.py add-project \
+  --name "D01" \
+  --chat-id "oc_xxx" \
+  --reviewers "reviewer1,reviewer2" \
+  --at-emails "user1@auto-link.com.cn,user2@auto-link.com.cn"
+
+# 列出所有项目配置
+python3 pipeline_config.py list-projects
+
+# 删除项目配置
+python3 pipeline_config.py remove-project --name "D01"
 ```
 
 ### 飞书消息格式
@@ -805,24 +1087,23 @@ cd <skill_dir>/scripts && python3 feishu_notify.py \
 #### 单仓库提交卡片
 
 - **标题**：Gerrit Pipeline 通知（颜色随评审结果变化：绿/橙/红）
-- **CR 编号**：可点击跳转到 Gerrit
-- **分支** + **提交概要**
-- **评审评分** + **问题统计**
-- **Checklist 状态**
-- **审核人**：@mention 配置的成员
+- **提交概要**：以链接形式展示，点击跳转到 Gerrit Change URL
+- **CR 编号** + **分支**
+- **提交人** + **评审评分**
+- **Checklist** + **问题统计**
+- **审核人**：@mention 配置的成员（根据项目配置匹配）
 
 #### 多仓库关联提交卡片
 
 当传入 `--topic` 参数时，使用多仓库卡片格式：
 
 - **标题**：Gerrit Pipeline 通知 — 关联提交（颜色随最低评审评分变化）
-- **Topic**：显示 topic 名称，可点击跳转到 Gerrit topic 搜索页（`https://gerrit.auto-link.com.cn/q/topic:xxx`）
-- **分支** + **提交概要**
+- **提交概要**：以链接形式展示，点击跳转到 Gerrit Topic 搜索页
+- **Topic** + **分支**
+- **提交人** + **评审评分**
+- **Checklist** + **问题统计**
 - **关联 CR 列表**：每个 CR 一行，显示仓库名 + CR 编号（可点击跳转）
-- **评审评分**：取所有 CR 中最低分
-- **问题统计**：所有 CR 问题数汇总
-- **Checklist 状态**
-- **审核人**：@mention 配置的成员
+- **审核人**：@mention 配置的成员（根据项目配置匹配）
 
 ### 飞书应用权限
 
@@ -950,6 +1231,19 @@ cd <skill_dir>/scripts && python3 feishu_notify.py \
 ---
 
 ## 版本历史
+
+### v1.7.0（2026/5/3）
+
+1. **按项目差异化配置**：新增 `projects` 配置字段，不同项目可指定专属飞书通知群、@mention 审核人和 Gerrit Reviewer；Pipeline Step 1 中通过 AskUserQuestion 让用户选择当前所属项目，自动匹配项目配置覆盖顶层默认值，向后兼容
+2. **评审结论贴回兜底**：Step 2 完成后自动校验评审结论是否已贴回 Gerrit，未贴回时由 pipeline 调用 `gerrit_post_review.py` 兜底执行（处理 self-review 场景）
+3. **飞书通知卡片调整**：提交概要移至卡片最上方，以可点击链接形式展示（单仓库跳转 Change URL，多仓库跳转 Topic 搜索页）
+4. **配置交互优化**：`配置 gerrit-pipeline` 时，基础配置完成后自动询问是否需要按项目配置，引导用户循环添加项目专属配置
+5. **新增脚本 `gerrit_post_review.py`**：将评审结论贴到 Gerrit CR 评论（不带 Code-Review label），支持 `--check-only` 检查模式
+
+### v1.6.4（2026/5/2）
+
+1. **Commit Message 强制校验（校验-修正-重试闭环）**：git commit 后、git push 前新增强制校验步骤，运行完整校验脚本逐项检查 15 项规则；校验失败时 Claude 自动修正并 amend，最多重试 3 次，仍不通过则中止流水线
+2. **触发词说明**：明确自然语言触发词依赖 AI 语义匹配、无法保证 100% 命中，推荐使用 `/gerrit-pipeline` 斜杠命令精确触发
 
 ### v1.6.3（2026/5/1）
 
