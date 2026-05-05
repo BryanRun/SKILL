@@ -1,7 +1,7 @@
 ---
 name: gerrit-pipeline
 description: >-
-  Gerrit 一键提交评审流水线。串联 代码提交 → CR评审 → Checklist → 飞书通知 四步流程，严格按顺序依次调用各步骤。每步均支持独立操作。
+  Gerrit 一键提交评审流水线。串联 代码提交 → CR评审 → Checklist → 通知前确认 → 飞书通知 流程，严格按 Step 1 → 2 → 3 → 3.5 → 4 顺序依次调用。每步均支持独立操作。
   内置完整的 Gerrit 代码提交能力（commit message 规范、推送、amend、cherry-pick）。
   触发：gerrit pipeline / gp / 一键提交 / 提交并评审 / submit and review / 一键提交评审 /
   独立操作：pipeline submit / gerrit submit / gerrit push / gerrit amend / gerrit cherry-pick / 提交到gerrit / 推送代码 / 提交代码审查 / 推代码 / 提交CR /
@@ -10,7 +10,7 @@ description: >-
 
 # Gerrit Pipeline — 一键提交评审流水线
 
-将代码提交、自动评审、Checklist、飞书通知四步串联为一键流水线。每步均支持独立操作。
+将代码提交、自动评审、Checklist、通知前确认、飞书通知串联为一键流水线（Step 1 → 2 → 3 → 3.5 → 4）。每步均支持独立操作。
 
 代码提交能力（Step 1）已内置，无需安装 gerrit-submit skill。
 
@@ -38,7 +38,7 @@ description: >-
 |--------|------|---------|
 | `pipeline submit` / `gerrit submit` / `gerrit push` / `提交到gerrit` / `推送代码` / `提交代码审查` / `推代码` / `提交CR` | Step 1: 代码提交 | 当前仓库有未提交的变更 |
 | `gerrit amend` | Step 1: Amend 追加 patchset | 当前仓库有未提交的变更 + 已有 Change |
-| `gerrit cherry-pick` | Step 1: Cherry-pick 到其他分支 | 目标分支名 |
+| `gerrit cherry-pick` | Step 1: Cherry-pick 到其他分支 | 目标分支名 + JIRA-ID 确认 |
 | `pipeline review <CR编号>` / `评审CR` | Step 2: 代码评审 | CR 编号 |
 | `pipeline checklist <CR编号>` / `贴checklist` | Step 3: 贴 Checklist | CR 编号 |
 | `pipeline notify` / `飞书通知` | Step 4: 飞书通知 | CR 编号、URL、评审结果 |
@@ -60,6 +60,34 @@ Step 4: 飞书通知              → 发送流水线结果卡片到飞书群
 ```
 
 **四步严格顺序执行**，任一步骤失败则中止流水线并向用户报告。
+
+### 流水线上下文传递
+
+完整流水线在同一会话中顺序执行，Step 1 读取的配置信息在后续步骤中直接复用，**禁止重复查找**。
+
+#### 凭据上下文（Step 1 读取，后续步骤复用）
+
+Step 1 执行时从 `~/.config/gerrit-pipeline/config.json` 读取以下信息，后续步骤直接使用，不再重复读取配置文件：
+
+| 信息项 | 来源 | 复用步骤 |
+|--------|------|---------|
+| `gerrit.user` | config.json | Step 2 兜底、Step 3 |
+| `gerrit.http_password` | config.json | Step 2 兜底、Step 3 |
+| CR 编号 | Step 1 push 输出 | Step 2、3、4 |
+| 项目名称 | Step 1 用户选择 | Step 2、3、4（reviewer/通知匹配） |
+
+#### 环境变量设置
+
+Step 1 完成后，后续步骤调用脚本前，直接用 Step 1 已读取的值设置环境变量，不再重新查找：
+
+```bash
+export GERRIT_USER="{Step 1 已读取的 gerrit.user}"
+export GERRIT_HTTP_PASSWORD="{Step 1 已读取的 gerrit.http_password}"
+```
+
+#### 独立操作例外
+
+当某步骤以独立操作方式触发（非完整流水线）时，无 Step 1 上下文，此时按原有方式从配置文件读取凭据。
 
 ---
 
@@ -342,6 +370,19 @@ git push autolink HEAD:refs/for/{目标分支}%r={reviewer1},r={reviewer2}
 
 当需要将当前提交 cherry-pick 到其他分支时：
 
+##### JIRA-ID 确认（必需步骤，不可跳过）
+
+> **Cherry-pick 前必须通过 AskUserQuestion 向用户确认 JIRA-ID，即使原 commit 中已包含 JIRA-ID 也必须确认。此步骤为强制项，不可跳过。**
+
+执行流程：
+1. 读取原 commit message 中的 JIRA-ID
+2. 通过 AskUserQuestion 向用户展示当前 JIRA-ID 并确认：
+   - 选项 1：沿用原 JIRA-ID `【{原JIRA-ID}】`
+   - 选项 2：使用新的 JIRA-ID（用户输入新 ID）
+3. 用户确认后，将最终确定的 JIRA-ID 用于 cherry-pick 后的 commit message
+
+##### 操作步骤
+
 ```bash
 # 1. 切换到目标分支
 git checkout {目标分支}
@@ -350,9 +391,11 @@ git pull autolink {目标分支}
 # 3. cherry-pick 指定 commit
 git cherry-pick {commit-hash}
 # 4. 如有冲突，解决后 git cherry-pick --continue
-# 5. 推送到 Gerrit
+# 5. 如用户选择了新 JIRA-ID，amend commit message 替换 JIRA-ID
+git commit --amend  # 仅在 JIRA-ID 变更时执行
+# 6. 推送到 Gerrit
 git push autolink HEAD:refs/for/{目标分支}%r={reviewer1},r={reviewer2}
-# 6. 切回原分支
+# 7. 切回原分支
 git checkout {原分支}
 ```
 
@@ -360,6 +403,7 @@ git checkout {原分支}
 - cherry-pick 会生成新的 commit（新 Change-Id），在 Gerrit 上是独立的 Change
 - 如果 cherry-pick 多个 commit，逐个操作并分别推送
 - 冲突解决后需确认 commit message 格式仍符合规范
+- JIRA-ID 确认必须在 cherry-pick 操作之前完成，确保 push 前 commit message 中的 JIRA-ID 正确
 
 ### 1.6 Commit Message 强制校验（校验-修正-重试闭环）
 
@@ -449,12 +493,28 @@ git commit --amend（仅修正 message，不改变代码）
 
 ### 1.7 交互式辅助流程
 
-当用户触发提交流程时，Claude 按以下步骤辅助。根据是否为关联提交，分为两条路径。
+当用户触发提交流程时，Claude 按以下步骤辅助。先确认提交模式，再根据模式进入对应路径。
 
-#### 第一步：确认是否为多仓库关联提交（最先确认）
+#### 第一步：确认提交模式（最先确认）
+
+- 如果用户的触发指令中已明确提交模式（如包含"amend"、"追加"、"cherry-pick"等关键词），则视为已确认，跳过此问
+- 否则通过 AskUserQuestion 询问用户：
+
+  | 选项 | 说明 |
+  |------|------|
+  | 新建提交 | 创建新 commit，生成新 Change |
+  | Amend 追加 | 在已有 Change 上追加 patchset（git commit --amend） |
+  | Cherry-pick | 将已有 commit cherry-pick 到其他分支 |
+
+确认提交模式后，根据模式进入对应流程：
+- **新建提交**：继续第二步（确认关联提交），然后走路径 A / B
+- **Amend**：跳过关联提交确认，直接走路径 C（Amend 流程）
+- **Cherry-pick**：跳过关联提交确认，直接走路径 D（Cherry-pick 流程）
+
+#### 第二步：确认是否为多仓库关联提交（仅新建提交模式）
 
 - 如果用户的触发指令中已包含 topic 相关关键词（如"关联提交"、"多仓库"、"topic"、明确给出了 topic 名称），则视为已确认，跳过此问
-- 否则首先通过 AskUserQuestion 询问用户
+- 否则通过 AskUserQuestion 询问用户
 
 ---
 
@@ -464,7 +524,7 @@ git commit --amend（仅修正 message，不改变代码）
 
 **信息收集**（通过 AskUserQuestion）：
 1. 提交类型：bug / change / feature
-2. JIRA-ID
+2. **JIRA-ID**（必需步骤，不可跳过）：必须通过 AskUserQuestion 向用户确认，不可自行推断或省略
 3. 概要描述
 4. 目标分支（从当前分支推断或询问）
 5. **开发自测视频**（可选）：通过 AskUserQuestion 询问用户是否需要添加【开发自测视频】字段；选"需要"→ commit message 末尾加入固定行 `【开发自测视频】申请豁免，原因：已自测通过，请实车验证`；选"不需要"→ 不添加此行
@@ -491,7 +551,7 @@ git commit --amend（仅修正 message，不改变代码）
 3. **用户确认关联仓库列表**：将扫描结果通过 AskUserQuestion（multiSelect）展示给用户。提示用户：**勾选需要关联提交的仓库，勾选完成后点击 Submit 确认**。确认后的仓库列表即为本次关联提交范围
 4. **提交顺序**：根据确认的仓库数量自动编号（【1/y】→【y/y】）。如涉及 APK 的 sdk_release 仓库，自动将其排到最后。用户可调整顺序
 5. **提交类型**：bug / change / feature（所有仓库共享）
-6. **JIRA-ID**（所有仓库共享）
+6. **JIRA-ID**（必需步骤，不可跳过）：必须通过 AskUserQuestion 向用户确认，不可自行推断或省略（所有仓库共享）
 7. **概要描述**（所有仓库共享）
 8. **目标分支**（所有仓库共享，或各仓库分别指定）
 9. **开发自测视频**（可选）：通过 AskUserQuestion 询问用户是否需要添加【开发自测视频】字段；选"需要"→ 所有仓库 commit message 末尾均加入固定行 `【开发自测视频】申请豁免，原因：已自测通过，请实车验证`；选"不需要"→ 不添加此行
@@ -537,6 +597,39 @@ repo forall -c 'if [ -n "$(git status --porcelain)" ]; then echo "$(pwd)"; fi'
 - 所有仓库均 push 成功
 - 所有 CR 共享同一 topic
 - 汇总输出：各仓库的 CR 编号、URL、提交顺序
+
+---
+
+#### 路径 C：Amend 追加 Patchset
+
+> 在已有 Change 上追加修改，保留原 Change-Id，Gerrit 自动关联为新 patchset。完整流水线中 amend 完成后继续执行 Step 2 → 3 → 3.5 → 4。
+
+**信息收集**（通过 AskUserQuestion）：
+1. **JIRA-ID**（必需步骤，不可跳过）：读取当前 HEAD commit message 中的 JIRA-ID，通过 AskUserQuestion 向用户确认沿用或更换
+2. 目标分支（从当前分支推断或询问）
+
+**执行流程**：
+1. `git add` 暂存变更文件
+2. `git commit --amend`（保留原 Change-Id；如 JIRA-ID 变更则同步修改 commit message）
+3. 强制校验 commit message（1.6 节）
+4. `git push autolink HEAD:refs/for/{目标分支}%r={reviewer1},r={reviewer2}`
+5. 提取 CR 编号（从 push 输出中获取）
+
+**注意**：
+- amend 必须保留原 commit message 中的 `Change-Id`，推送前确认未被改变
+- 不要使用 `git commit`（无 `--amend`），否则会创建新 Change 而非追加 patchset
+
+---
+
+#### 路径 D：Cherry-pick 到其他分支
+
+> 将已有 commit cherry-pick 到其他分支。完整流水线中 cherry-pick 完成后继续执行 Step 2 → 3 → 3.5 → 4。
+
+**信息收集**（通过 AskUserQuestion）：
+1. **JIRA-ID 确认**（必需步骤，不可跳过）：读取原 commit 的 JIRA-ID，询问沿用或更换
+2. 目标分支
+
+**执行流程**：按 1.5 节 Cherry-pick 操作步骤执行。
 
 ### 1.8 常用命令速查
 
@@ -723,14 +816,15 @@ cd <skill_dir>/scripts && python3 gerrit_post_review.py \
 
 ### ⚠️ 用户确认声明
 
-> **本步骤需要用户人工确认。** Claude 会根据评审结果预填 Checklist 并展示给用户，待用户确认后方可贴出。Checklist 一经贴出即视为提交人已逐项审阅并认可其内容，相关责任由提交人承担。
+> **本步骤需要用户人工确认。** Claude 将 Checklist 模板原样展示给用户，待用户确认后方可贴出。Checklist 一经贴出即视为提交人已逐项审阅并认可其内容，相关责任由提交人承担。
 
 执行本步骤时，Claude **必须**：
-1. 先将预填好的 Checklist **完整展示**给用户
+1. 将 Checklist 模板**完全原样展示**给用户
    - **禁止省略、截断或简化 Checklist 内容**
+   - **禁止修改任何检查项的文字描述**
+   - **禁止标注状态（✓ / x / o）**，所有状态标记保持模板原样（空格）
    - 必须包含模板中的所有 12 项检查项（流程合规 3 项 + 测试验证 4 项 + 平台化 4 项 + 安全合规 1 项）
    - 必须包含评审结论建议的 3 个选项（Approve / Need Info / Request Changes）
-   - 每项前的标记（✓ / x / o）必须完整填写
 2. 通过 AskUserQuestion 请求用户确认，问题文案**必须**包含以下责任声明（不论单仓库还是多仓库关联提交，每次确认前都必须展示）：
 
    ```
@@ -781,68 +875,34 @@ Claude 先将填好的 Checklist 写入临时文件，再调用脚本贴到 Gerr
 | **作用** | 评价代码质量 | 确认流程合规、测试验证、平台化、安全合规 |
 | **贴到 Gerrit** | **必需**，以评审评论形式贴出 | **必需**，以 Checklist 评论形式贴出 |
 | **展示给用户** | **必需**，完整展示评审结论 | **必需**，完整展示全部 12 项 |
-| **是否可修改** | 根据代码评审结果生成 | **内容完全固化，不可修改** |
+| **是否可修改** | 根据代码评审结果生成 | **完全固化，不可修改（包括状态标注）** |
 
 **关键原则**：
 1. **评审结论和 Checklist 都是必需项**，两者都必须展示给用户并贴回 Gerrit，缺一不可
 2. **Step 2 的评审结论不能替代 Step 3 的 Checklist**
 3. **Step 3 的 Checklist 不能省略或简化为评审结论**
-4. **Checklist 的 12 项检查内容完全固化**，不可根据评审结果增删或修改检查项的文字描述
-5. Claude 只能标注每项的状态（✓ / x / o），不能修改检查项本身的内容
+4. **Checklist 完全按模板原样输出**，Claude 不可修改任何内容，包括检查项文字、状态标注、评审结论建议选项
 
-Checklist 模板中的"评审结论建议"（Approve / Need Info / Request Changes）是 Checklist 自身的一部分，它参考 Step 2 的评审结果来标注，但不等同于 Step 2 的评审结论。
+Checklist 模板中的"评审结论建议"（Approve / Need Info / Request Changes）是 Checklist 自身的一部分，不等同于 Step 2 的评审结论。
 
-### Checklist 内容固化规则
+### Checklist 完全固化规则
 
-**Checklist 的 12 项检查内容完全固化，不可变更**：
+**Checklist 的全部内容完全固化，Claude 必须严格按模板原样输出，不可做任何修改**：
 
-- ✅ **可以做**：根据实际情况标注每项的状态（✓ / x / o）
 - ❌ **禁止做**：
+  - 标注状态（✓ / x / o）— 保持模板中的占位符原样
   - 修改检查项的标题或描述文字
+  - 修改评审结论建议的选项文字
   - 增加或删除检查项
-  - 根据评审结果调整检查项内容
+  - 根据评审结果调整任何内容
   - 将评审结论的内容插入到 Checklist 中
   - 用评审结论替代 Checklist
 
-**示例**：
-
-✅ 正确：
-```
-- [✓] **任务关联**：填写有效的JIRA任务或BUG编号，非关联任务不能反复用同一个JIRA单
-```
-
-❌ 错误：
-```
-- [✓] **任务关联**：commit message 中包含 JIRA-ID CHYT1V-123
-```
-（禁止修改检查项的描述文字）
-
-### Checklist 标注规则
-
-Claude 根据 Step 2 的评审结果和实际情况，自动标注每项：
-
-| 标记 | 含义 | 使用场景 |
-|------|------|---------|
-| `✓` | 通过 | 该项检查通过或已确认 |
-| `x` | 未通过 | 该项存在问题需要修改 |
-| `o` | 不适用 | 该项在本次提交中不涉及（如"若有"、"可选"项） |
-
-**标注依据**：
-
-- **任务关联**：commit message 中有有效 JIRA-ID → ✓
-- **分支关联**：单分支提交 → o；多分支需求 → 根据情况标注
-- **提交关联**：无关联提交 → o；有关联 → 根据 topic 情况标注
-- **功能测试 / 回归测试 / 集成测试**：根据 commit message 中【自测用例】【自测方法】字段标注
-- **单元测试**：可选项，无单测 → o
-- **接口定义 / 接口发布**：根据是否修改了对外接口判断
-- **可配置化**：根据是否涉及配置参数判断
-- **技术债**：根据评审结论判断，无技术债 → o
-- **开源合规**：无新增开源组件 → ✓
-- **评审结论建议**：P0=0 且 P1=0 → Approve；有 P1 → Need Info；有 P0 → Request Changes
+Checklist 的状态标注（✓ / x / o）和评审结论建议的勾选由**人工 reviewer 在 Gerrit 上完成**，Claude 不参与标注。
 
 ### 独立操作
 
-触发 `pipeline checklist <CR编号>` 时，仅执行本步骤。如缺少评审结果，Claude 先通过 `gerrit_show.py` 获取 CR 信息辅助标注。
+触发 `pipeline checklist <CR编号>` 时，仅执行本步骤。Claude 将 Checklist 模板原样贴出，不做任何标注或修改。
 
 ### 本步骤完成标志
 
@@ -1089,8 +1149,9 @@ python3 pipeline_config.py remove-project --name "D01"
 - **标题**：Gerrit Pipeline 通知（颜色随评审结果变化：绿/橙/红）
 - **提交概要**：以链接形式展示，点击跳转到 Gerrit Change URL
 - **CR 编号** + **分支**
-- **提交人** + **评审评分**
-- **Checklist** + **问题统计**
+- **提交人** + **提交日期**
+- **评审评分** + **问题统计**
+- **Checklist**
 - **审核人**：@mention 配置的成员（根据项目配置匹配）
 
 #### 多仓库关联提交卡片
@@ -1100,8 +1161,9 @@ python3 pipeline_config.py remove-project --name "D01"
 - **标题**：Gerrit Pipeline 通知 — 关联提交（颜色随最低评审评分变化）
 - **提交概要**：以链接形式展示，点击跳转到 Gerrit Topic 搜索页
 - **Topic** + **分支**
-- **提交人** + **评审评分**
-- **Checklist** + **问题统计**
+- **提交人** + **提交日期**
+- **评审评分** + **问题统计**
+- **Checklist**
 - **关联 CR 列表**：每个 CR 一行，显示仓库名 + CR 编号（可点击跳转）
 - **审核人**：@mention 配置的成员（根据项目配置匹配）
 
@@ -1144,34 +1206,34 @@ python3 pipeline_config.py remove-project --name "D01"
 ---
 
 #### 📎 流程合规
-- [{任务关联}] **任务关联**：填写有效的JIRA任务或BUG编号，非关联任务不能反复用同一个JIRA单
-- [{分支关联}] **分支关联**：需要提交的分支（如release分支）都已Cherry pick（若有）
-- [{提交关联}] **提交关联**：拉齐有关联或依赖的相关方代码提交，并关联了同一个Topic（若有）
+- [ ] **任务关联**：填写有效的JIRA任务或BUG编号，非关联任务不能反复用同一个JIRA单
+- [ ] **分支关联**：需要提交的分支（如release分支）都已Cherry pick（若有）
+- [ ] **提交关联**：拉齐有关联或依赖的相关方代码提交，并关联了同一个Topic（若有）
 
 #### 🧪 测试验证
-- [{功能测试}] **功能测试**：预期功能或问题缺陷的测试验证通过，测试报告已提交到Jira单
-- [{回归测试}] **回归测试**：最小自测清单测试验证通过，测试报告已提交到Jira单
-- [{集成测试}] **集成测试**：全量的接口集成测试验证通过，测试报告已提交到Jira单（可选）
-- [{单元测试}] **单元测试**：覆盖率满足该模块测试等级要求且测试通过，测试报告已提交到Jira单（可选）
+- [ ] **功能测试**：预期功能或问题缺陷的测试验证通过，测试报告已提交到Jira单
+- [ ] **回归测试**：最小自测清单测试验证通过，测试报告已提交到Jira单
+- [ ] **集成测试**：全量的接口集成测试验证通过，测试报告已提交到Jira单（可选）
+- [ ] **单元测试**：覆盖率满足该模块测试等级要求且测试通过，测试报告已提交到Jira单（可选）
 
 #### 🧱 平台化
-- [{接口定义}] **接口定义**：对外接口定义简洁明了，且可跨项目、跨平台复用，文档更新匹配（若有）
-- [{接口发布}] **接口发布**：对外接口更新时，重新生成接口文档和SDK包给到相关方（若有）
-- [{可配置化}] **可配置化**：特定项目需求实现配置化，相关配置参数已在文档或清单中已更新
-- [{技术债}] **技术债**：若暂时达不到平台化要求，需要登记到技术债务清单（若有）
+- [ ] **接口定义**：对外接口定义简洁明了，且可跨项目、跨平台复用，文档更新匹配（若有）
+- [ ] **接口发布**：对外接口更新时，重新生成接口文档和SDK包给到相关方（若有）
+- [ ] **可配置化**：特定项目需求实现配置化，相关配置参数已在文档或清单中已更新
+- [ ] **技术债**：若暂时达不到平台化要求，需要登记到技术债务清单（若有）
 
 #### 🔐 安全合规
-- [{开源合规}] **开源合规**：所使用开源组件，符合其版权协议要求，不存在法律风险
+- [ ] **开源合规**：所使用开源组件，符合其版权协议要求，不存在法律风险
 
 ---
 
 ### 📝 评审结论建议
-- [{approve}] ✅ **Approve**（满足所有关键项，AI预审无高风险问题）
-- [{need_info}] ⚠️ **Need Info**（需补充信息后决定）
-- [{request_changes}] ❌ **Request Changes**（需修改后重新提交）
+- ( ) ✅ **Approve**（满足所有关键项，AI预审无高风险问题）
+- ( ) ⚠️ **Need Info**（需补充信息后决定）
+- ( ) ❌ **Request Changes**（需修改后重新提交）
 ```
 
-将模板中的 `{占位符}` 替换为 `✓`、`x` 或 `o`。评审结论三选一标 `✓`，其余标空格。
+> **Claude 必须严格按上述模板原样输出，不得替换占位符、标注状态或修改任何文字。** 所有状态标注由人工 reviewer 在 Gerrit 上完成。
 
 ---
 
@@ -1219,7 +1281,7 @@ python3 pipeline_config.py remove-project --name "D01"
 
 ## 注意事项
 
-1. **顺序不可调换**：完整流水线必须按 Step 1 → 2 → 3 → 4 顺序执行
+1. **顺序不可调换**：完整流水线必须按 Step 1 → 2 → 3 → 3.5 → 4 顺序执行
 2. **CR 编号传递**：Step 1 的输出是后续所有步骤的输入，务必正确提取
 3. **Self-review 限制**：Gerrit 禁止对自己的 CR 打分，评审评论会以不带 Code-Review label 的方式贴出
 4. **Checklist 自动标注**：Claude 根据评审结果自动填写，人工 reviewer 可在 Gerrit 上修改
@@ -1231,6 +1293,15 @@ python3 pipeline_config.py remove-project --name "D01"
 ---
 
 ## 版本历史
+
+### v1.8.0（2026/5/5）
+
+1. **JIRA-ID 确认强制化**：所有提交场景（单仓库、多仓库关联、Cherry-pick）中 JIRA-ID 确认为必需步骤，必须通过 AskUserQuestion 向用户确认，不可自行推断或省略
+2. **完整流水线支持 Amend / Cherry-pick 模式**：1.7 节交互式辅助流程新增"第一步：确认提交模式"（新建 / Amend / Cherry-pick），新增路径 C（Amend 追加 Patchset）和路径 D（Cherry-pick），完整流水线不再只走新建 commit 路径
+3. **Gerrit 凭据上下文传递**：Step 1 读取的 `gerrit.user` / `gerrit.http_password` / CR 编号 / 项目名称在后续步骤直接复用，禁止重复查找配置文件；独立操作时按原有方式读取
+4. **Checklist 完全固化（不可标注）**：Claude 不再标注状态（✓/x/o），不再修改任何检查项文字或评审结论建议选项，完全按模板原样输出；所有状态标注由人工 reviewer 在 Gerrit 上完成
+5. **飞书通知卡片新增"提交日期"字段**：单仓库和多仓库卡片均新增提交日期（`YYYY-MM-DD HH:MM`），自动取脚本执行时的本地时间
+6. **流水线步骤编号修正**：补全 Step 3.5（通知前确认），流水线顺序描述改为 `Step 1 → 2 → 3 → 3.5 → 4`
 
 ### v1.7.0（2026/5/3）
 

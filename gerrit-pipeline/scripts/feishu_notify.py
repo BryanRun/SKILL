@@ -18,7 +18,7 @@
 
 配置文件：~/.config/gerrit-pipeline/config.json（由 pipeline_config.py init 生成）
 """
-import os, sys, json, time, argparse
+import os, sys, json, time, argparse, datetime
 import requests
 from pipeline_config import resolve_config
 
@@ -114,6 +114,7 @@ def build_single_card(args, at_members=None, submitter=None):
     score_display = _score_text(args.score)
     checklist_display = _checklist_text(args.checklist)
     issues = f"P0={args.p0}  P1={args.p1}  P2={args.p2}  P3={args.p3}"
+    submit_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
     header_color = "green"
     if args.score < 0 or args.p0 > 0:
@@ -146,14 +147,20 @@ def build_single_card(args, at_members=None, submitter=None):
             "tag": "div",
             "fields": [
                 {"is_short": True, "text": {"tag": "lark_md", "content": f"**提交人**\n{submitter_text}" if submitter_text else "**提交人**\n-"}},
+                {"is_short": True, "text": {"tag": "lark_md", "content": f"**提交日期**\n{submit_time}"}},
+            ],
+        },
+        {
+            "tag": "div",
+            "fields": [
                 {"is_short": True, "text": {"tag": "lark_md", "content": f"**评审评分**\n{score_display}"}},
+                {"is_short": True, "text": {"tag": "lark_md", "content": f"**问题统计**\n{issues}"}},
             ],
         },
         {
             "tag": "div",
             "fields": [
                 {"is_short": True, "text": {"tag": "lark_md", "content": f"**Checklist**\n{checklist_display}"}},
-                {"is_short": True, "text": {"tag": "lark_md", "content": f"**问题统计**\n{issues}"}},
             ],
         },
     ]
@@ -192,6 +199,7 @@ def build_topic_card(args, at_members=None, submitter=None):
     score_display = _score_text(args.score)
     checklist_display = _checklist_text(args.checklist)
     issues = f"P0={args.p0}  P1={args.p1}  P2={args.p2}  P3={args.p3}"
+    submit_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
     header_color = "green"
     if args.score < 0 or args.p0 > 0:
@@ -238,14 +246,20 @@ def build_topic_card(args, at_members=None, submitter=None):
             "tag": "div",
             "fields": [
                 {"is_short": True, "text": {"tag": "lark_md", "content": f"**提交人**\n{submitter_text}" if submitter_text else "**提交人**\n-"}},
+                {"is_short": True, "text": {"tag": "lark_md", "content": f"**提交日期**\n{submit_time}"}},
+            ],
+        },
+        {
+            "tag": "div",
+            "fields": [
                 {"is_short": True, "text": {"tag": "lark_md", "content": f"**评审评分**\n{score_display}"}},
+                {"is_short": True, "text": {"tag": "lark_md", "content": f"**问题统计**\n{issues}"}},
             ],
         },
         {
             "tag": "div",
             "fields": [
                 {"is_short": True, "text": {"tag": "lark_md", "content": f"**Checklist**\n{checklist_display}"}},
-                {"is_short": True, "text": {"tag": "lark_md", "content": f"**问题统计**\n{issues}"}},
             ],
         },
         {
