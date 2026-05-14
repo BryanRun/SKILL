@@ -1,6 +1,6 @@
 # gerrit-pipeline — 使用说明
 
-**版本：v1.8.2**
+**版本：v1.8.3**
 
 gerrit-pipeline 是一个 Claude Code Skill，为车联 AutoLink 团队提供 Gerrit 代码提交评审一站式自动化能力。只需一句指令，即可完成从代码提交、自动评审、Checklist 贴回到飞书群通知的完整流水线，也支持每个步骤独立执行。目标是减少重复操作、统一提交规范、加速 Code Review 闭环。
 
@@ -269,6 +269,7 @@ python3 pipeline_config.py remove-project --name "D01"
 
 | 版本 | 日期 | 变更摘要 |
 |------|------|---------|
+| v1.8.3 | 2026-05-14 | 飞书通知卡片底部 footer 新增显示 skill 版本号（如 `由 Gerrit Pipeline v1.8.3 自动发送`），版本号从 README 动态解析，发版时只需改 README |
 | v1.8.2 | 2026-05-14 | 1. Checklist 模板预填状态：9 项 `[✓]` + 3 项可选 `[o]` + 结论预选 Approve，Claude 直接复制输出避免空白和勾选丢失<br>2. 规则措辞同步：从"禁止标注状态"改为"按模板原样输出（含预填状态）"<br>3. Step 3 性能优化：明确直接复制不做推理 |
 | v1.8.1 | 2026-05-06 | 【影响范围】字段最低字数从无要求改为 8 字，与模板规范对齐 |
 | v1.8.0 | 2026-05-05 | 1. JIRA-ID 确认强制化：所有提交场景必须通过 AskUserQuestion 确认 JIRA-ID<br>2. 完整流水线支持 Amend / Cherry-pick 模式，新增路径 C / D<br>3. Gerrit 凭据上下文传递：Step 1 读取后续步骤直接复用，禁止重复查找<br>4. Checklist 完全固化：不再标注状态，完全按模板原样输出<br>5. 飞书通知卡片新增"提交日期"字段<br>6. 流水线步骤编号修正，补全 Step 3.5 |

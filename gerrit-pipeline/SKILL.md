@@ -1297,6 +1297,11 @@ python3 pipeline_config.py remove-project --name "D01"
 
 ## 版本历史
 
+### v1.8.3（2026/5/14）
+
+1. **飞书通知卡片 footer 显示版本号**：单仓库与多仓库关联提交两种卡片底部 note 由「由 Gerrit Pipeline 自动发送」改为「由 Gerrit Pipeline v{版本号} 自动发送」
+2. **版本号动态解析**：`feishu_notify.py` 启动时从同目录上层 `README.md` 头部 `**版本：v1.8.3**` 行解析，发版时只需改 README 一处，footer 自动同步；找不到 README 时 fallback 为 `unknown`，不影响通知发送
+
 ### v1.8.2（2026/5/14）
 
 1. **Checklist 模板预填状态**：12 项检查项中 9 项预填 `[✓]`、3 项可选项预填 `[o]`；评审结论建议预选 `[✓] Approve`。Step 3 由 Claude 直接复制模板输出（含预填状态），不再贴空白模板，避免 LLM 重新判定造成的耗时和勾选丢失

@@ -18,12 +18,28 @@
 
 配置文件：~/.config/gerrit-pipeline/config.json（由 pipeline_config.py init 生成）
 """
-import os, sys, json, time, argparse, datetime
+import os, sys, json, time, argparse, datetime, re
 import requests
 from pipeline_config import resolve_config
 
 BASE_URL = "https://open.feishu.cn/open-apis"
 CONFIG_PATH = os.path.expanduser("~/.config/gerrit-pipeline/config.json")
+
+
+def _read_version():
+    readme = os.path.join(os.path.dirname(__file__), "..", "README.md")
+    try:
+        with open(readme, encoding="utf-8") as f:
+            for line in f:
+                m = re.match(r"\*\*版本：v([\d.]+)\*\*", line.strip())
+                if m:
+                    return m.group(1)
+    except OSError:
+        pass
+    return "unknown"
+
+
+__version__ = _read_version()
 
 _token_cache = {"token": None, "expire_at": 0}
 
@@ -180,7 +196,7 @@ def build_single_card(args, at_members=None, submitter=None):
     elements.append({
         "tag": "note",
         "elements": [
-            {"tag": "plain_text", "content": "由 Gerrit Pipeline 自动发送"},
+            {"tag": "plain_text", "content": f"由 Gerrit Pipeline v{__version__} 自动发送"},
         ],
     })
 
@@ -283,7 +299,7 @@ def build_topic_card(args, at_members=None, submitter=None):
     elements.append({
         "tag": "note",
         "elements": [
-            {"tag": "plain_text", "content": "由 Gerrit Pipeline 自动发送"},
+            {"tag": "plain_text", "content": f"由 Gerrit Pipeline v{__version__} 自动发送"},
         ],
     })
 
