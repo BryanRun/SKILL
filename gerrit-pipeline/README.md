@@ -1,19 +1,25 @@
 # gerrit-pipeline — 使用说明
 
-**版本：v1.8.3**
+**版本：v1.9.1**
 
-gerrit-pipeline 是一个 Claude Code Skill，为车联 AutoLink 团队提供 Gerrit 代码提交评审一站式自动化能力。只需一句指令，即可完成从代码提交、自动评审、Checklist 贴回到飞书群通知的完整流水线，也支持每个步骤独立执行。目标是减少重复操作、统一提交规范、加速 Code Review 闭环。
+gerrit-pipeline 是一个 Claude Code 优先、Agent Neutral 兼容的 Skill，为车联 AutoLink 团队提供 Gerrit 代码提交评审一站式自动化能力。Claude Code 中可获得最佳体验：斜杠命令、结构化确认、多选、Skill 调用都能直接串联；其他 Agent 只要支持读取 skill 文档、执行脚本、与用户确认/选择，也可以按同一流程执行。v1.9.0 起，原 Step 3（Checklist 确认）与原 Step 3.5（飞书通知前确认）合并为单一确认屏，在不降低安全红线的前提下减少交互弹窗。目标是减少重复操作、统一提交规范、加速 Code Review 闭环。
 
 ## 1. 功能概览
 
-```
+```text
 Step 1: 代码提交    → 生成规范 commit message + push 到 Gerrit
 Step 2: 代码评审    → 七维自动评审 + 结果贴回 Gerrit
-Step 3: Checklist  → AutoLink Code Review Checklist v2.0 贴到 Gerrit
-Step 4: 飞书通知    → 发送评审结果卡片到飞书群，@审核人
+Step 3: 合并确认    → 同屏展示 Checklist 预览 + 飞书通知预览，一次确认后贴 Checklist
+Step 4: 飞书通知    → Checklist 全部成功后发送评审结果卡片到飞书群，@审核人
 ```
 
 ## 2. 首次使用配置
+
+### 2.0 Agent 兼容说明
+
+- **推荐运行时：Claude Code**。直接使用 `/gerrit-pipeline`、`配置 gerrit-pipeline` 和结构化交互，步骤最少
+- **兼容运行时：其他 Agent**。需具备 shell/Python 执行能力、用户确认/选择能力，并能调用或复用 `enhanced_code_review`
+- **交互等价原则**：文档中的 `AskUserQuestion` 表示结构化确认/选择/输入；非 Claude Agent 可用等价表单、多选控件或清晰的对话提问实现，但不能省略 JIRA 确认、commit message 确认、Checklist 责任声明等红线
 
 ### 2.1 前置条件
 
@@ -24,17 +30,17 @@ Step 4: 飞书通知    → 发送评审结果卡片到飞书群，@审核人
 
 在 Claude Code 中直接输入：
 
-```
+```text
 配置 gerrit-pipeline
 ```
 
-Claude 会通过对话交互引导你完成全部配置，包括：
+Claude 会通过结构化对话交互引导你完成全部配置，包括：
 
 1. **Gerrit 凭据**：用户名、HTTP 密码、默认 Reviewer 列表
 2. **飞书通知**：目标群 chat_id、需要 @mention 的审核人
 3. **按项目配置**（可选）：为不同项目指定专属的飞书通知群、审核人和 Reviewer
 
-整个过程无需手动编辑任何文件或运行脚本，Claude 会自动完成环境变量设置和配置文件生成。
+整个过程无需手动编辑任何文件或运行脚本，Claude 会自动完成环境变量设置和配置文件生成。这是当前体验最完整的路径。
 
 > **提示**：如需修改已有配置，同样输入 `配置 gerrit-pipeline`，Claude 会读取现有配置并引导你更新。
 
@@ -43,6 +49,7 @@ Claude 会通过对话交互引导你完成全部配置，包括：
 #### 2.3.1 初始化配置文件
 
 ```bash
+# Claude Code 默认安装路径示例；其他 Agent 请替换为自己的 skill 安装目录
 cd ~/.claude/skills/gerrit-pipeline/scripts
 python3 pipeline_config.py init
 ```
@@ -62,6 +69,7 @@ python3 pipeline_config.py init
 当你负责多个项目，不同项目需要通知不同飞书群、@不同审核人或指定不同 Reviewer 时，可在基础配置之上添加项目专属配置：
 
 ```bash
+# Claude Code 默认安装路径示例；其他 Agent 请替换为自己的 skill 安装目录
 cd ~/.claude/skills/gerrit-pipeline/scripts
 
 # 添加项目配置（自动查询 at_members 的飞书 open_id）
@@ -99,22 +107,23 @@ python3 pipeline_config.py lookup-users --emails "user1@company.com" --save
 ## 3. 使用方式
 
 > **⚠️ 关于触发方式的说明**：
-> - **最具确定性的调用方式**：`/gerrit-pipeline`（斜杠命令，精确触发）
+> - **Claude Code 中最具确定性的调用方式**：`/gerrit-pipeline`（斜杠命令，精确触发）
 > - 以下自然语言触发词均依赖 AI 语义匹配，**无法保证 100% 命中**
-> - 如遇触发失败，请使用 `/gerrit-pipeline` 斜杠命令
+> - 其他 Agent 如不支持斜杠命令，应使用明确自然语言：`gerrit pipeline` / `pipeline submit` / `pipeline notify`
+> - Claude Code 中如遇触发失败，请使用 `/gerrit-pipeline` 斜杠命令
 
 ### 3.1 完整流水线
 
-在 Claude Code 中输入以下任意触发词：
+在 Claude Code 或其他兼容 Agent 中输入以下任意触发词：
 
-```
+```text
 gerrit pipeline
 gp
 一键提交
 提交并评审
 ```
 
-Claude 会按 Step 1 → 2 → 3 → 3.5 → 4 顺序自动执行全部步骤。
+执行 Agent 会按 Step 1 → 2 → 3 → 4 顺序自动执行全部步骤。
 
 ### 3.2 独立操作
 
@@ -131,39 +140,30 @@ Claude 会按 Step 1 → 2 → 3 → 3.5 → 4 顺序自动执行全部步骤。
 
 ### 3.3 用户交互步骤一览
 
-完整流水线中，Claude 会在以下节点与用户交互。标注为「可选」的步骤在条件不满足时自动跳过。
+完整流水线中，执行 Agent 会在以下节点与用户交互。Claude Code 可用结构化弹窗合并交互；其他 Agent 可分步询问。标注为「可选」的步骤在条件不满足时自动跳过。
 
 #### Step 1：代码提交
 
 | # | 交互步骤 | 必选/可选 | 说明 |
 |---|---------|----------|------|
 | 1 | 确认提交模式（新建 / Amend / Cherry-pick） | 必选 | 触发指令中已包含模式关键词时自动跳过 |
-| 2 | 是否为多仓库关联提交 | 必选（仅新建提交） | 触发指令中已包含 topic 关键词时自动跳过 |
+| 2 | 预扫描并自动判定单仓库 / 多仓库路径 | 自动（仅新建提交） | 扫描脏仓库数量后自动进入路径 A / B，不再单独询问"是否为多仓库关联提交" |
 | 3 | 选择所属项目 | 可选 | 仅在配置了 `projects` 时触发；只有一个项目时自动选中 |
 | 4 | JIRA-ID | 必选 | 不可跳过，必须通过交互确认 |
-| 5 | 提交类型（bug / change / feature） | 必选（仅新建提交） | |
-| 6 | 概要描述 | 必选（仅新建提交） | |
-| 7 | 目标分支 | 必选 | 可从当前分支推断 |
-| 8 | 是否添加【开发自测视频】 | 可选（仅新建提交） | 选"不需要"则不添加该字段 |
-| 9 | 确认关联仓库列表 | 必选（仅关联提交） | 扫描后 multiSelect 展示，用户勾选确认 |
-| 10 | Topic 名称 | 必选（仅关联提交） | |
-| 11 | 确认 commit message | 必选 | 展示生成的 commit message，用户确认或修改 |
+| 5 | 新建提交信息批量确认 | 必选（仅新建提交） | 同屏收集提交类型、概要描述、目标分支、是否添加【开发自测视频】 |
+| 6 | 确认关联仓库列表 | 必选（仅关联提交） | 自动扫描结果作为 multiSelect 候选项呈现，用户明确勾选本次需要关联提交的仓库 |
+| 7 | Topic 名称 | 必选（仅关联提交） | |
+| 8 | 确认 commit message | 必选 | 展示生成的 commit message，用户确认或修改 |
 
 #### Step 2：代码评审
 
 无用户交互，自动执行。
 
-#### Step 3：贴 Checklist
+#### Step 3：合并确认
 
 | # | 交互步骤 | 必选/可选 | 说明 |
 |---|---------|----------|------|
-| 12 | 确认 Checklist 内容 | 必选 | 完整展示 12 项检查 + 评审结论建议，含责任声明，确认后才贴出 |
-
-#### Step 3.5：发送飞书通知前确认
-
-| # | 交互步骤 | 必选/可选 | 说明 |
-|---|---------|----------|------|
-| 13 | 确认是否发送飞书通知 | 必选 | 确认门禁通过、关联 Change 就绪；选"暂不发送"则中止通知，不影响前序结果 |
+| 9 | 合并确认屏 | 必选 | 同屏展示 1 份固定 Checklist 预览、飞书通知卡片预览与责任声明；可选全部确认 / 仅贴 Checklist 暂不发飞书 |
 
 #### Step 4：飞书通知
 
@@ -213,7 +213,7 @@ Claude 会按 Step 1 → 2 → 3 → 3.5 → 4 顺序自动执行全部步骤。
 | `projects.<项目名>.feishu.chat_id` | 项目专属飞书群 ID，覆盖顶层 |
 | `projects.<项目名>.feishu.at_members` | 项目专属 @mention 审核人，覆盖顶层 |
 
-> **匹配规则**：Pipeline 在 Step 1 中通过 AskUserQuestion 让用户选择本次提交所属项目（从 `projects` 的 key 列出）。匹配到的字段覆盖顶层默认值，未配置的字段自动 fallback。同一仓库可属于多个项目，每次提交时由用户选择。只有一个项目时自动选中，无 `projects` 配置时跳过。
+> **匹配规则**：Pipeline 在 Step 1 中通过 `AskUserQuestion` 或等价交互能力让用户选择本次提交所属项目（从 `projects` 的 key 列出）。匹配到的字段覆盖顶层默认值，未配置的字段自动 fallback。同一仓库可属于多个项目，每次提交时由用户选择。只有一个项目时自动选中，无 `projects` 配置时跳过。
 
 ### 4.1 按项目配置管理
 
@@ -245,7 +245,7 @@ python3 pipeline_config.py remove-project --name "D01"
 1. Python 3.6+
 2. `requests` 库（`pip install requests`）
 3. Gerrit SSH 访问权限（用于 git push）
-5. **enhanced_code_review skill**：Step 2（代码评审）依赖此 skill 提供七维自动评审能力，需同步安装到 `~/.claude/skills/` 目录下
+4. **enhanced_code_review skill**：Step 2（代码评审）依赖此 skill 提供七维自动评审能力。Claude Code 默认同步安装到 `~/.claude/skills/`；其他 Agent 安装到各自的 skill/插件目录，并确保 gerrit-pipeline 能调用其等价流程
 
 > Step 1（代码提交）、Step 3（Checklist）、Step 4（飞书通知）为内置能力，无额外 skill 依赖。
 
@@ -263,12 +263,14 @@ python3 pipeline_config.py remove-project --name "D01"
 
 ## 8. 版本下载
 
-最新版本及历史版本下载：[gerrit-pipeline 版本下载](https://t83dfrspj4.feishu.cn/wiki/Ja9BwNfKfi4ajAkwzSrcEFdznne)
+最新版本及历史版本下载：[gerrit-pipeline-v1.9.1.zip](https://t83dfrspj4.feishu.cn/wiki/Urrkw0A72if06ykzcmFcSdsrnag)
 
 ## 9. 版本历史
 
 | 版本 | 日期 | 变更摘要 |
 |------|------|---------|
+| v1.9.1 | 2026-05-21 | Agent Neutral 通用性说明：保留 Claude Code 作为最佳体验路径，同时明确其他 Agent 的等价交互、脚本调用和 enhanced_code_review 复用要求 |
+| v1.9.0 | 2026-05-21 | 1. 原 Step 3 与 Step 3.5 合并为单一确认屏：Checklist 预览、飞书通知预览、责任声明同屏展示<br>2. 提交流程交互压缩：新建提交不再单问"是否多仓库"，改为预扫描自动判路；批量收集提交信息，减少弹窗次数<br>3. 多仓库 Checklist 只展示 1 份固定模板预览并统一确认，但执行级仍逐 CR 串行贴回<br>4. 故障边界明确：任一 Checklist 贴回失败则中止飞书发送，并向用户报告部分成功状态 |
 | v1.8.3 | 2026-05-14 | 飞书通知卡片底部 footer 新增显示 skill 版本号（如 `由 Gerrit Pipeline v1.8.3 自动发送`），版本号从 README 动态解析，发版时只需改 README |
 | v1.8.2 | 2026-05-14 | 1. Checklist 模板预填状态：9 项 `[✓]` + 3 项可选 `[o]` + 结论预选 Approve，Claude 直接复制输出避免空白和勾选丢失<br>2. 规则措辞同步：从"禁止标注状态"改为"按模板原样输出（含预填状态）"<br>3. Step 3 性能优化：明确直接复制不做推理 |
 | v1.8.1 | 2026-05-06 | 【影响范围】字段最低字数从无要求改为 8 字，与模板规范对齐 |

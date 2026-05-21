@@ -1,13 +1,13 @@
 # SKILL
 
-A collection of [Claude Code](https://claude.ai/claude-code) skills for automotive middleware development workflows — covering code review, Gerrit integration, and Feishu document automation.
+A collection of Claude Code-first, agent-compatible skills for automotive middleware development workflows — covering code review, Gerrit integration, and Feishu document automation.
 
 ## Overview
 
 | Skill | Description | Version |
 |-------|-------------|---------|
 | [enhanced_code_review](./enhanced_code_review/) | 6-dimension code review with Gerrit and local module support | 2.0.0 |
-| [gerrit-pipeline](./gerrit-pipeline/) | One-click pipeline: submit → review → checklist → Feishu notification | - |
+| [gerrit-pipeline](./gerrit-pipeline/) | One-click pipeline: submit → review → checklist → Feishu notification | 1.9.1 |
 | [gerrit-submit](./gerrit-submit/) | Gerrit commit message generation, push, amend, and cherry-pick | - |
 | [feishu-docs](./feishu-docs/) | Read, create, edit, and export Feishu (Lark) documents and whiteboards | - |
 
@@ -33,8 +33,8 @@ End-to-end pipeline that chains four steps in strict order:
 ```
 Step 1: Code Submit    → Generate commit message + git push → CR number
 Step 2: Code Review    → 6-dimension review + post to Gerrit
-Step 3: Checklist      → Post AutoLink Code Review Checklist v2.0
-Step 4: Feishu Notify  → Send result card to Feishu group chat
+Step 3: Confirm        → Checklist + Feishu notification confirmation
+Step 4: Feishu Notify  → Send result card to Feishu group chat after checklist succeeds
 ```
 
 Each step can also be triggered independently.
@@ -59,7 +59,7 @@ Interact with Feishu (Lark) cloud documents via Open Platform API:
 
 ## Prerequisites
 
-- [Claude Code](https://claude.ai/claude-code) CLI or IDE extension
+- Claude Code CLI/IDE extension for the best native skill experience, or another compatible agent that can read skill docs, run shell/Python scripts, and ask the user for confirmations
 - Python 3.10+ (for automation scripts)
 - Git with SSH access to Gerrit (for Gerrit-related skills)
 
@@ -75,16 +75,18 @@ Interact with Feishu (Lark) cloud documents via Open Platform API:
 
 ## Installation
 
-Copy or symlink the desired skill directories into your Claude Code skills directory:
+For Claude Code, copy or symlink the desired skill directories into your Claude Code skills directory:
 
 ```bash
 # Example: install all skills
 cp -r enhanced_code_review feishu-docs gerrit-pipeline gerrit-submit ~/.claude/skills/
 ```
 
+For other agents, install the same directories into that agent's skill/plugin location and keep script paths resolvable from the skill directory.
+
 ## Usage
 
-Skills are invoked through Claude Code via natural language or slash commands:
+Skills are invoked through Claude Code via natural language or slash commands. Other compatible agents can use the same explicit natural-language commands; slash commands are a Claude Code optimization when supported.
 
 ```
 # Code review via Gerrit CR number

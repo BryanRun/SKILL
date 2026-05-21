@@ -1,7 +1,7 @@
 ---
 name: gerrit-pipeline
 description: >-
-  Gerrit 一键提交评审流水线。串联 代码提交 → CR评审 → Checklist → 通知前确认 → 飞书通知 流程，严格按 Step 1 → 2 → 3 → 3.5 → 4 顺序依次调用。每步均支持独立操作。
+  Gerrit 一键提交评审流水线。串联 代码提交 → CR评审 → Checklist+飞书通知合并确认 流程，严格按 Step 1 → 2 → 3 → 4 顺序依次调用（v1.9.0 起 Step 3 合并原 Step 3.5 通知前确认）。每步均支持独立操作。
   内置完整的 Gerrit 代码提交能力（commit message 规范、推送、amend、cherry-pick）。
   触发：gerrit pipeline / gp / 一键提交 / 提交并评审 / submit and review / 一键提交评审 /
   独立操作：pipeline submit / gerrit submit / gerrit push / gerrit amend / gerrit cherry-pick / 提交到gerrit / 推送代码 / 提交代码审查 / 推代码 / 提交CR /
@@ -10,16 +10,28 @@ description: >-
 
 # Gerrit Pipeline — 一键提交评审流水线
 
-将代码提交、自动评审、Checklist、通知前确认、飞书通知串联为一键流水线（Step 1 → 2 → 3 → 3.5 → 4）。每步均支持独立操作。
+将代码提交、自动评审、Checklist + 飞书通知前确认串联为一键流水线（Step 1 → 2 → 3 → 4，v1.9.0 起 Step 3 合并原 Step 3.5 的确认职责）。每步均支持独立操作。
 
 代码提交能力（Step 1）已内置，无需安装 gerrit-submit skill。
+
+## Agent 运行时兼容模型
+
+本 skill 采用 **Claude Code 优先、Agent Neutral 兼容** 的设计：
+
+- **Claude Code 是推荐运行时**：可直接使用斜杠命令、`AskUserQuestion`、multiSelect、Skill tool 调用等原生能力，交互步骤最少，体验最佳
+- **其他 Agent 是兼容运行时**：只要能读取本文件、执行 shell/Python 脚本、与用户进行确认/选择交互，并调用等价的代码评审能力，即可按同一流程执行
+- **交互能力抽象**：文中的 `AskUserQuestion` 表示“向用户发起结构化确认/选择/输入”的能力；Claude Code 可使用原生 `AskUserQuestion`，其他 Agent 可用等价表单、多选控件或明确的对话提问实现
+- **Skill 调用抽象**：文中的 `Skill(...)` 表示“调用另一个已安装能力/子流程”；Claude Code 可使用 Skill tool，其他 Agent 可直接加载对应 skill 文档或调用其脚本/流程
+
+除明确标注为“Claude Code 优化路径”的内容外，流程规则、故障边界、确认红线和脚本调用均不依赖特定 Agent。
 
 ## 触发条件
 
 > **⚠️ 关于触发方式的说明**：
-> - **最具确定性的调用方式**：`/gerrit-pipeline`（斜杠命令，精确触发）
+> - **Claude Code 中最具确定性的调用方式**：`/gerrit-pipeline`（斜杠命令，精确触发）
 > - **自然语言触发词**（如下所列）均依赖 AI 语义匹配，**无法保证 100% 命中**
-> - 如遇触发失败，请使用 `/gerrit-pipeline` 斜杠命令
+> - 其他 Agent 如不支持斜杠命令，应使用明确自然语言：`gerrit pipeline` / `pipeline submit` / `pipeline notify`
+> - Claude Code 中如遇触发失败，请使用 `/gerrit-pipeline` 斜杠命令
 
 ### 完整流水线
 
@@ -43,7 +55,7 @@ description: >-
 | `pipeline checklist <CR编号>` / `贴checklist` | Step 3: 贴 Checklist | CR 编号 |
 | `pipeline notify` / `飞书通知` | Step 4: 飞书通知 | CR 编号、URL、评审结果 |
 
-独立操作时，Claude 根据触发词识别目标步骤，仅执行该步骤。如缺少必要输入，通过 AskUserQuestion 向用户收集。
+独立操作时，执行 Agent 根据触发词识别目标步骤，仅执行该步骤。如缺少必要输入，通过 `AskUserQuestion` 或等价交互能力向用户收集。
 
 ---
 
@@ -54,10 +66,13 @@ Step 1: gerrit-submit        → 生成 commit message + git push → 获得 CR 
           ↓
 Step 2: enhanced_code_review → review CR <编号> → 七维评审 + 贴回 Gerrit
           ↓
-Step 3: 贴 Checklist          → 将 AutoLink Code Review Checklist v2.0 贴到 Gerrit
+Step 3: 合并确认              → 同屏展示 Checklist 预览 + 飞书通知卡片预览 + 责任声明
+                              → 用户一次确认后：串行贴 Checklist 到所有 CR
           ↓
-Step 4: 飞书通知              → 发送流水线结果卡片到飞书群
+Step 4: 飞书通知              → Checklist 全部成功后发送飞书通知
 ```
+
+> **v1.9.0 合并说明**：原 Step 3（Checklist 确认贴出）与原 Step 3.5（飞书通知前确认）合并为单一确认屏。执行级仍保持顺序与故障边界：所有 Checklist 贴回成功后才发送飞书；任一 Checklist 贴失败则中止飞书发送并报告部分成功状态。
 
 **四步严格顺序执行**，任一步骤失败则中止流水线并向用户报告。
 
@@ -249,11 +264,11 @@ echo "$topic_name" | grep -qE '^[A-Za-z0-9_-]+$' || echo "ERROR: Topic 名称包
    - 【自测用例】≥ 20 字
    - 【自测方法】≥ 4 字
 5. **其他必填字段**：确认【影响范围】【代码修改量】【提交项目/分支】【体现版本】存在
-6. **体现版本格式**：【体现版本】由 Claude 自动填入当日日期，格式固定为 `After YYYY/M/D`（如 `After 2026/4/30`），不接受其他格式
+6. **体现版本格式**：【体现版本】由执行 Agent 自动填入当日日期，格式固定为 `After YYYY/M/D`（如 `After 2026/4/30`），不接受其他格式
 7. **开发自测视频**（可选）：如用户选择添加，确认【开发自测视频】存在且内容为固定值
 8. **严格符合模板**：commit message body 只能包含模板中定义的字段，不得有任何模板外的多余行（如 Co-Authored-By、Signed-off-by 等）
 
-**校验脚本（供 Claude 内部调用）**：
+**校验脚本（供执行 Agent 内部调用）**：
 
 ```bash
 # 获取最新 commit message
@@ -338,7 +353,7 @@ git push autolink HEAD:refs/for/al_chery-d01_dev2%r=reviewer1,r=reviewer2,topic=
 **完整流程**：
 
 1. 确认当前分支和目标分支
-2. 如配置了 `projects`，通过 AskUserQuestion 让用户选择本次提交所属项目（只有一个项目时自动选中，无 `projects` 配置时跳过）
+2. 如配置了 `projects`，通过 `AskUserQuestion` 或等价交互能力让用户选择本次提交所属项目（只有一个项目时自动选中，无 `projects` 配置时跳过）
 3. 读取配置文件中的 `gerrit.reviewers` 列表（根据所选项目匹配专属配置，未选择时使用顶层默认值）
 4. 执行提交前检查（编译 + 单元测试）
 5. `git add` 暂存变更文件
@@ -372,11 +387,11 @@ git push autolink HEAD:refs/for/{目标分支}%r={reviewer1},r={reviewer2}
 
 ##### JIRA-ID 确认（必需步骤，不可跳过）
 
-> **Cherry-pick 前必须通过 AskUserQuestion 向用户确认 JIRA-ID，即使原 commit 中已包含 JIRA-ID 也必须确认。此步骤为强制项，不可跳过。**
+> **Cherry-pick 前必须通过 `AskUserQuestion` 或等价交互能力向用户确认 JIRA-ID，即使原 commit 中已包含 JIRA-ID 也必须确认。此步骤为强制项，不可跳过。**
 
 执行流程：
 1. 读取原 commit message 中的 JIRA-ID
-2. 通过 AskUserQuestion 向用户展示当前 JIRA-ID 并确认：
+2. 通过 `AskUserQuestion` 或等价交互能力向用户展示当前 JIRA-ID 并确认：
    - 选项 1：沿用原 JIRA-ID `【{原JIRA-ID}】`
    - 选项 2：使用新的 JIRA-ID（用户输入新 ID）
 3. 用户确认后，将最终确定的 JIRA-ID 用于 cherry-pick 后的 commit message
@@ -429,7 +444,7 @@ git commit 完成
       ↓ 否
 展示校验错误给用户
       ↓
-Claude 自动修正 commit message
+执行 Agent 自动修正 commit message
       ↓
 git commit --amend（仅修正 message，不改变代码）
       ↓
@@ -464,7 +479,7 @@ git commit --amend（仅修正 message，不改变代码）
 
 #### 自动修正规则
 
-当校验失败时，Claude 按以下规则自动修正，**无需再次询问用户**：
+当校验失败时，执行 Agent 按以下规则自动修正，**无需再次询问用户**：
 
 | 错误类型 | 自动修正方式 |
 |---------|------------|
@@ -493,12 +508,14 @@ git commit --amend（仅修正 message，不改变代码）
 
 ### 1.7 交互式辅助流程
 
-当用户触发提交流程时，Claude 按以下步骤辅助。先确认提交模式，再根据模式进入对应路径。
+> **v1.9.0 交互精简**：本节按"推断优先 + 批量弹窗 + 合并确认"重排。在 Claude Code 中可用 `AskUserQuestion` 将原 9 次以上弹窗压缩到 3-4 屏；其他 Agent 可分多轮提问实现，但不得省略安全红线（JIRA-ID 强制确认 / commit message 最终确认 / Checklist 模板固化 / 责任声明）。
 
-#### 第一步：确认提交模式（最先确认）
+当用户触发提交流程时，执行 Agent 按以下步骤辅助。先确认提交模式，再根据模式进入对应路径。
 
-- 如果用户的触发指令中已明确提交模式（如包含"amend"、"追加"、"cherry-pick"等关键词），则视为已确认，跳过此问
-- 否则通过 AskUserQuestion 询问用户：
+#### 第一步：确认提交模式（Screen 0）
+
+- 如果用户的触发指令中已明确提交模式（如包含 "amend"、"追加"、"cherry-pick" 等关键词），则视为已确认，**跳过此屏**
+- 否则通过 `AskUserQuestion` 或等价交互能力单题询问用户：
 
   | 选项 | 说明 |
   |------|------|
@@ -506,55 +523,109 @@ git commit --amend（仅修正 message，不改变代码）
   | Amend 追加 | 在已有 Change 上追加 patchset（git commit --amend） |
   | Cherry-pick | 将已有 commit cherry-pick 到其他分支 |
 
+> **不可基于 git 状态自动推断提交模式**：Amend / Cherry-pick / 新建提交的后续字段差异大（如 Amend 不需要"提交类型/概要"），误判代价高，必须由用户显式选择。
+
 确认提交模式后，根据模式进入对应流程：
-- **新建提交**：继续第二步（确认关联提交），然后走路径 A / B
-- **Amend**：跳过关联提交确认，直接走路径 C（Amend 流程）
-- **Cherry-pick**：跳过关联提交确认，直接走路径 D（Cherry-pick 流程）
+- **新建提交**：继续第二步（预扫描决定路径），然后走路径 A / B
+- **Amend**：跳过预扫描，直接走路径 C（Amend 流程）
+- **Cherry-pick**：跳过预扫描，直接走路径 D（Cherry-pick 流程）
 
-#### 第二步：确认是否为多仓库关联提交（仅新建提交模式）
+#### 第二步：预扫描决定 Path A / B（**不再询问"是否多仓库"**）
 
-- 如果用户的触发指令中已包含 topic 相关关键词（如"关联提交"、"多仓库"、"topic"、明确给出了 topic 名称），则视为已确认，跳过此问
-- 否则通过 AskUserQuestion 询问用户
+仅在新建提交模式下执行。执行 Agent 在进入路径分支前**先扫描脏仓库**：
+
+```bash
+# manifest 管理的工作区
+repo forall -c 'if [ -n "$(git status --porcelain)" ]; then echo "$(pwd)"; fi'
+
+# 普通单仓库
+git status --porcelain
+```
+
+根据扫描结果**自动**决定路径，不再向用户询问：
+
+| 扫描结果 | 自动进入 | 备注 |
+|---------|---------|------|
+| 1 个脏仓库 | 路径 A（单仓库） | 不询问"是否多仓库" |
+| ≥2 个脏仓库 | 路径 B（多仓库关联提交） | 不询问"是否多仓库"；扫描结果作为 multiSelect 候选项呈现给用户，由用户明确选择参与仓库 |
+| 0 个脏仓库 | 报错中止 | 提示用户先暂存或修改文件 |
+
+> **触发关键词覆盖**：若用户触发词中已含 "关联提交"、"多仓库"、"topic"、明确给出 topic 名称等关键词，无视扫描结果直接进入路径 B。
 
 ---
 
 #### 路径 A：非关联提交（单仓库）
 
-流程不变，与原有行为一致：
+**Screen 1（批量收集核心字段）**：Claude Code 优先通过单次 `AskUserQuestion`（最多 4 问/屏）一次性收集；其他 Agent 可用等价结构化表单或连续提问收集：
 
-**信息收集**（通过 AskUserQuestion）：
-1. 提交类型：bug / change / feature
-2. **JIRA-ID**（必需步骤，不可跳过）：必须通过 AskUserQuestion 向用户确认，不可自行推断或省略
-3. 概要描述
-4. 目标分支（从当前分支推断或询问）
-5. **开发自测视频**（可选）：通过 AskUserQuestion 询问用户是否需要添加【开发自测视频】字段；选"需要"→ commit message 末尾加入固定行 `【开发自测视频】申请豁免，原因：已自测通过，请实车验证`；选"不需要"→ 不添加此行
+| 字段 | 来源 / 默认值 | 备注 |
+|------|--------------|------|
+| **项目**（多项目时） | 配置 `projects` 列表 | 只配置 1 个项目时**自动选中**，本字段不再询问，把名额留给其他 |
+| **JIRA-ID**（必需，不可跳过） | 用户输入（可从当前分支名 / 上一笔 commit 推断为推荐项） | v1.8.0 红线 |
+| **提交类型** | bug / change / feature | 三选一 |
+| **目标分支** | 默认从当前分支推断为推荐项 | 用户可改 |
 
-**自动生成 Commit Message**：
+> Claude Code 中因 `AskUserQuestion` 单屏最多 4 题，超出时（如多项目场景）按"项目 + JIRA + 类型 + 分支"优先级取前 4 项；【开发自测视频】合并到 Screen 2 选项中。其他 Agent 即使可一次收集更多字段，也应保持相同字段优先级和最终确认语义。
+
+**自动生成 Commit Message**（无用户交互）：
 1. 分析 `git diff --staged` 的内容
 2. 生成各必填字段内容（原因分析、解决方案等）
 3. 估算代码修改量
 4. 填充提交分支和体现版本
-5. 展示给用户确认后提交
 
-**推送确认**：
-- 确认目标分支、Reviewer 列表（根据所选项目匹配配置）
-- 执行 git commit + git push
+**Screen 2（commit message 预览 + 自测视频开关 + 最终确认）**：Claude Code 使用单次 `AskUserQuestion` 展示 3 选项；其他 Agent 使用等价确认交互：
+
+| 选项 | 行为 |
+|------|------|
+| 确认推送（含【开发自测视频】） | 末尾追加固定行 `【开发自测视频】申请豁免，原因：已自测通过，请实车验证`，然后进入校验-修正-重试（§1.6.4） → push |
+| 确认推送（不含【开发自测视频】） | 不追加自测视频行，进入校验-修正-重试（§1.6.4） → push |
+| 需要修改 commit message | 接收用户修改意见 → 重新生成 → 重新展示同屏。**最多 3 轮**，超出后 hand off 给用户手动编辑（参照 §1.6.4 重试上限精神） |
+
+> **§1.6.4 commit-msg 校验-修正-重试闭环在用户"确认推送"之后、`git push` 之前照常执行，不可省略。**
+
+**推送**：
+- 使用所选项目对应的 reviewer 列表执行 git push
 - 提取 CR 编号
 
 ---
 
 #### 路径 B：多仓库关联提交
 
-**信息收集**（通过 AskUserQuestion，一次性收集所有共享信息）：
-1. **Topic 名称**（必填）：推荐格式 `模块名_功能_日期`，如 `D01_FWK_20250428`。校验不含空格、冒号等特殊字符
-2. **自动扫描变更仓库**：在当前 repo（manifest 管理）根目录下，通过 `repo status` 或遍历子仓库执行 `git status --porcelain` 扫描所有有代码变动的仓库，列出待提交仓库的绝对路径和变更文件数
-3. **用户确认关联仓库列表**：将扫描结果通过 AskUserQuestion（multiSelect）展示给用户。提示用户：**勾选需要关联提交的仓库，勾选完成后点击 Submit 确认**。确认后的仓库列表即为本次关联提交范围
-4. **提交顺序**：根据确认的仓库数量自动编号（【1/y】→【y/y】）。如涉及 APK 的 sdk_release 仓库，自动将其排到最后。用户可调整顺序
-5. **提交类型**：bug / change / feature（所有仓库共享）
-6. **JIRA-ID**（必需步骤，不可跳过）：必须通过 AskUserQuestion 向用户确认，不可自行推断或省略（所有仓库共享）
-7. **概要描述**（所有仓库共享）
-8. **目标分支**（所有仓库共享，或各仓库分别指定）
-9. **开发自测视频**（可选）：通过 AskUserQuestion 询问用户是否需要添加【开发自测视频】字段；选"需要"→ 所有仓库 commit message 末尾均加入固定行 `【开发自测视频】申请豁免，原因：已自测通过，请实车验证`；选"不需要"→ 不添加此行
+**Screen 1（关联仓库列表 multiSelect）**：将第二步扫描结果通过 `AskUserQuestion` multiSelect（Claude Code 优化路径）或等价多选交互展示为候选列表，用户必须明确勾选本次需要关联提交的仓库。
+
+提示文案：**请选择本次需要关联提交的仓库；未勾选的仓库不会参与本次提交。点击 Submit 确认**。
+
+> 若用户未选择任何仓库，或只选择 1 个仓库，则中止路径 B 并提示用户重新选择；单仓库提交应走路径 A。
+
+**Screen 2（批量收集核心字段，所有仓库共享）**：Claude Code 优先通过单次 `AskUserQuestion`（最多 4 问/屏）收集；其他 Agent 可用等价连续提问：
+
+| 字段 | 来源 / 默认值 | 备注 |
+|------|--------------|------|
+| **项目**（多项目时） | 配置 `projects` | 只 1 个项目时自动选中 |
+| **JIRA-ID**（必需，不可跳过） | 用户输入 | v1.8.0 红线 |
+| **提交类型** | bug / change / feature | 所有仓库共享 |
+| **目标分支** | 默认从当前分支推断为推荐项 | 所有仓库共享 |
+
+> Topic 名称采用**自动建议**（格式 `{模块名/项目名}_{JIRA-ID}_{YYYYMMDD}`），不再单独询问，挪到 Screen 3 中可修改。
+
+**自动生成所有仓库 Commit Message**（无用户交互）：
+1. 所有仓库共享基础信息（类型、JIRA-ID、概要描述、body 各字段）
+2. 每个仓库标题末尾自动追加对应 `【x/y】` 标识
+3. 各仓库 body 字段根据各自的 diff 内容分别生成
+4. 自动计算提交顺序（涉及 APK 的 sdk_release 仓库自动排到最后）
+
+**Screen 3（合并预览 + 自测视频 + Topic + 顺序确认）**：在同一屏展示：
+- 所有仓库的 diff 摘要 + 生成的 commit message
+- 自动建议的 Topic 名称（可改）
+- 自动计算的提交顺序（可调整）
+
+通过 `AskUserQuestion` 或等价确认交互提供 3 选项：
+
+| 选项 | 行为 |
+|------|------|
+| 全部确认（含【开发自测视频】） | 所有仓库 commit message 末尾追加自测视频行 → 按顺序逐仓 commit / 校验 / push |
+| 全部确认（不含【开发自测视频】） | 不追加自测视频行 → 按顺序逐仓 commit / 校验 / push |
+| 需要修改 | 接收用户修改意见（commit message / Topic / 顺序均可改） → 重新生成预览 → 重新展示同屏，最多 3 轮 |
 
 **扫描变更仓库的方法**：
 
@@ -566,31 +637,16 @@ repo status
 repo forall -c 'if [ -n "$(git status --porcelain)" ]; then echo "$(pwd)"; fi'
 ```
 
-**遍历检查各仓库变更**：
-1. 按提交顺序，依次 `cd` 到每个仓库
-2. 检查每个仓库是否有未暂存/未提交的变更（`git status`）
-3. 获取每个仓库的 `git diff`
-
-**统一生成 Commit Message**：
-1. 所有仓库共享基础信息（类型、JIRA-ID、概要描述、body 各字段）
-2. 每个仓库的标题末尾自动追加对应的 `【x/y】` 标识
-3. 各仓库的 body 字段（原因分析、解决方案等）根据各自的 diff 内容分别生成
-
-**统一展示并确认**：
-1. 一次性展示所有仓库的 diff 摘要 + 生成的 commit message
-2. 通过 AskUserQuestion 请求用户统一确认（"全部确认" / "需要修改"）
-3. 用户确认后，按顺序依次执行
-
 **按顺序依次提交推送**：
 1. 按 `【1/y】→【2/y】→...→【y/y】` 的顺序，依次对每个仓库执行：
    - `cd` 到仓库目录
    - `git add` 暂存变更
    - `git commit`（使用对应的 commit message）
-   - 本地校验 commit message 格式
+   - 本地校验 commit message 格式（§1.6.4 校验-修正-重试闭环照常执行）
    - `git push autolink HEAD:refs/for/{目标分支}%r={reviewer1},r={reviewer2},topic={topic名称}`
    - 提取 CR 编号
 2. **最后一笔（【y/y】）最后 push**
-3. 任一仓库 push 失败则中止后续仓库，向用户报告错误
+3. 任一仓库 push 失败则中止后续仓库，向用户报告**部分成功状态**（哪些 CR 已 push 成功，哪些未执行），不静默重试
 4. 全部 push 成功后，汇总所有 CR 编号
 
 **关联提交完成标志**：
@@ -602,10 +658,10 @@ repo forall -c 'if [ -n "$(git status --porcelain)" ]; then echo "$(pwd)"; fi'
 
 #### 路径 C：Amend 追加 Patchset
 
-> 在已有 Change 上追加修改，保留原 Change-Id，Gerrit 自动关联为新 patchset。完整流水线中 amend 完成后继续执行 Step 2 → 3 → 3.5 → 4。
+> 在已有 Change 上追加修改，保留原 Change-Id，Gerrit 自动关联为新 patchset。完整流水线中 amend 完成后继续执行 Step 2 → 3 → 4。
 
-**信息收集**（通过 AskUserQuestion）：
-1. **JIRA-ID**（必需步骤，不可跳过）：读取当前 HEAD commit message 中的 JIRA-ID，通过 AskUserQuestion 向用户确认沿用或更换
+**信息收集**（通过 `AskUserQuestion` 或等价交互能力）：
+1. **JIRA-ID**（必需步骤，不可跳过）：读取当前 HEAD commit message 中的 JIRA-ID，通过结构化确认向用户确认沿用或更换
 2. 目标分支（从当前分支推断或询问）
 
 **执行流程**：
@@ -623,9 +679,9 @@ repo forall -c 'if [ -n "$(git status --porcelain)" ]; then echo "$(pwd)"; fi'
 
 #### 路径 D：Cherry-pick 到其他分支
 
-> 将已有 commit cherry-pick 到其他分支。完整流水线中 cherry-pick 完成后继续执行 Step 2 → 3 → 3.5 → 4。
+> 将已有 commit cherry-pick 到其他分支。完整流水线中 cherry-pick 完成后继续执行 Step 2 → 3 → 4。
 
-**信息收集**（通过 AskUserQuestion）：
+**信息收集**（通过 `AskUserQuestion` 或等价交互能力）：
 1. **JIRA-ID 确认**（必需步骤，不可跳过）：读取原 commit 的 JIRA-ID，询问沿用或更换
 2. 目标分支
 
@@ -693,13 +749,13 @@ remote:   https://gerrit.auto-link.com.cn/c/.../+/<CR编号> ...
 
 ### 执行方式
 
-通过 Skill tool 调用 `enhanced_code_review`：
+Claude Code 优先通过 Skill tool 调用 `enhanced_code_review`：
 
 ```
 Skill({ skill: "enhanced_code_review", args: "review CR <CR编号>" })
 ```
 
-其中 `<CR编号>` 替换为实际编号。
+其中 `<CR编号>` 替换为实际编号。其他 Agent 如不支持 Skill tool，应加载 `enhanced_code_review/SKILL.md` 并按其 `review CR <CR编号>` 流程执行，或调用等价的评审脚本链；输出必须与 enhanced_code_review 的评审结论结构等价。
 
 **多仓库关联提交场景**：对 Step 1 产出的每个 CR 依次执行评审，逐个调用上述命令。每个 CR 独立产出评审评分和问题列表。
 
@@ -729,7 +785,7 @@ enhanced_code_review 执行完成
       ↓
   已贴回？ ──是──→ 继续 Step 3
       ↓ 否
-Claude 将评审结论（cover message）写入临时文件
+执行 Agent 将评审结论（cover message）写入临时文件
       ↓
 调用 gerrit_post_review.py 贴回评审结论（不带 Code-Review label）
       ↓
@@ -755,7 +811,7 @@ cd <skill_dir>/scripts && python3 gerrit_post_review.py \
 
 **Step 2：贴回评审结论（不带 Code-Review label）**
 
-Claude 将 enhanced_code_review 产出的评审结论（包含评审评分建议、P0-P3 问题统计、具体问题列表）写入临时文件，然后调用脚本贴回：
+执行 Agent 将 enhanced_code_review 产出的评审结论（包含评审评分建议、P0-P3 问题统计、具体问题列表）写入临时文件，然后调用脚本贴回：
 
 ```bash
 # 方式一：从文件读取评审结论
@@ -803,7 +859,7 @@ cd <skill_dir>/scripts && python3 gerrit_post_review.py \
 
 ### 独立操作
 
-触发 `pipeline review <CR编号>` 时，仅执行本步骤。如未提供 CR 编号，通过 AskUserQuestion 询问。
+触发 `pipeline review <CR编号>` 时，仅执行本步骤。如未提供 CR 编号，通过 `AskUserQuestion` 或等价交互能力询问。
 
 ### 失败处理
 
@@ -812,43 +868,85 @@ cd <skill_dir>/scripts && python3 gerrit_post_review.py \
 
 ---
 
-## Step 3：贴 Checklist
+## Step 3：合并确认（Checklist + 飞书通知前确认）
+
+> **v1.9.0 合并**：原 Step 3（Checklist 确认贴出）与原 Step 3.5（飞书通知前确认）合并为**单一确认屏**。多仓库场景下，Checklist 固定模板只展示一次，用户统一确认后串行贴回所有 CR。**确认 UI 合并，但执行级故障边界保留**：Checklist 串行贴回 → 全部成功后才发飞书 → 任一失败则中止飞书并报告部分状态。
 
 ### ⚠️ 用户确认声明
 
-> **本步骤需要用户人工确认。** Claude 将 Checklist 模板原样展示给用户，待用户确认后方可贴出。Checklist 一经贴出即视为提交人已逐项审阅并认可其内容，相关责任由提交人承担。
+> **本步骤需要用户人工确认。** 执行 Agent 将 Checklist 模板原样展示给用户、飞书通知卡片预览同屏展示，待用户确认后方可继续执行（贴 Checklist，并在全部成功后进入 Step 4 发飞书）。Checklist 一经贴出即视为提交人已逐项审阅并认可其内容，相关责任由提交人承担。
 
-执行本步骤时，Claude **必须**：
+执行本步骤时，执行 Agent **必须**：
 
 1. **直接输出固定模板**（不经 LLM 生成）：将本文件末尾「Checklist 模板」章节的内容**逐字复制**输出，不做任何推理、改写或重新生成
    - **禁止省略、截断或简化 Checklist 内容**
    - **禁止修改任何检查项的文字描述**
-   - **状态标记按模板原样输出**：模板已预填 `✓` / `o` / 空格，Claude 不得清空、修改或重新判定
+   - **状态标记按模板原样输出**：模板已预填 `✓` / `o` / 空格，执行 Agent 不得清空、修改或重新判定
    - 必须包含模板中的所有 12 项检查项（流程合规 3 项 + 测试验证 4 项 + 平台化 4 项 + 安全合规 1 项）
    - 必须包含评审结论建议的 3 个选项（Approve / Need Info / Request Changes）
-2. 通过 AskUserQuestion 请求用户确认，问题文案**必须**包含以下责任声明（不论单仓库还是多仓库关联提交，每次确认前都必须展示）：
+
+2. **多仓库场景**：Checklist 是固定模板，**只展示 1 份 Checklist 预览**；用户确认后，将同一份 Checklist 模板分别贴到 Step 1 产出的每个 CR 中
+
+3. **同屏展示飞书通知预览**：展示即将发送的卡片内容（含目标群、@提交人、@审核人、CR 列表、提交概要等），便于用户判断"门禁是否就绪"
+
+4. **通过 `AskUserQuestion` 或等价交互能力请求用户确认**，问题文案**必须**包含以下责任声明 + 飞书通知就绪 checklist（不论单仓库还是多仓库关联提交，每次确认前都必须展示）：
 
    ```
    ⚠️ Checklist 一经贴出即视为提交人已逐项审阅并认可其内容，相关责任由提交人承担。
    
-   请确认是否将上述 Checklist 贴到 Gerrit？
+   即将执行：
+   1. 将上述 Checklist 贴到 Gerrit（{N} 个 CR）
+   2. 发送上述飞书通知卡片
+   
+   请先确认：
+   - Gerrit 门禁（prebuild / precheck）已通过或正在进行中
+   - 所有关联 Change（若有）均已推送并具备合入条件
+   - Reviewer 已准备好进行评审
    ```
 
    选项：
-   - "确认贴出" — 将上述 Checklist 贴到 Gerrit CR 评论中
-   - "需要修改" — 需要调整 Checklist 内容后再贴出
 
-3. 用户确认后才调用脚本贴到 Gerrit；用户要求修改则按修改意见调整后重新确认
+   | 选项 | 行为 |
+   |------|------|
+   | 全部确认（贴 Checklist + 发飞书） | 串行贴所有 CR 的 Checklist → 全部成功后发送飞书通知 |
+   | 暂不发送飞书（仅贴 Checklist） | 串行贴所有 CR 的 Checklist，**不发送飞书**；用户可稍后用 `pipeline notify` 手动补发 |
 
-> **性能说明**：Checklist 模板是固定文本，Claude 应直接复制输出，不需要逐项"分析"或"生成"。这可以显著减少本步骤的 LLM 推理耗时。
+5. 用户确认后才调用脚本贴到 Gerrit。Checklist 模板固定不可修改，因此本步骤不提供"修改 Checklist"选项
+
+> **性能说明**：Checklist 模板是固定文本，执行 Agent 应直接复制输出，不需要逐项"分析"或"生成"。Claude Code 中这能显著减少 LLM 推理耗时，其他 Agent 也应保持同样策略。
+
+### 执行级故障边界（关键）
+
+合并的是**确认 UI**，不是执行流程。执行时**仍保持顺序与故障边界**：
+
+```
+用户选择"全部确认"
+      ↓
+按顺序串行贴 N 个 CR 的 Checklist
+  （每个 CR 调用 gerrit_post_checklist.py，失败立即中止后续）
+      ↓
+  全部 N 个成功？ ──否──→ 中止飞书发送
+      ↓ 是                  报告："M/N 个 Checklist 已成功贴回，
+   调用 feishu_notify.py        飞书未发送。可用 `pipeline notify`
+      ↓                          手动补发飞书通知。"
+   飞书发送成功 / 失败 →
+   按 Step 4 失败处理策略
+```
+
+**关键原则**：
+- Checklist 贴失败 → **绝不**发送飞书（保护 v1.5.0 设立的"门禁通过后才发通知"语义）
+- 飞书发送失败 → 不回滚 Checklist（已贴的 Checklist 不需要回滚）
+- 任何阶段失败 → 显式向用户报告**已完成的步骤** + **未完成的步骤** + **手动补救命令**
 
 ### 前置条件
 
 需要 CR 编号。完整流水线中由 Step 1 提供；独立操作时由用户提供。
 
-**多仓库关联提交场景**：对 Step 1 产出的每个 CR 依次执行 Checklist 贴回。每个 CR 独立展示 Checklist 并请求用户确认。
+**多仓库关联提交场景**：对 Step 1 产出的全部 CR **共一次确认**，但 Checklist 固定模板只预览一次；执行级仍逐 CR 串行贴回。
 
 ### 执行方式
+
+#### 1. 贴 Checklist（逐 CR 串行）
 
 使用 `gerrit-pipeline/scripts/gerrit_post_checklist.py` 将 Checklist 贴到 Gerrit：
 
@@ -865,7 +963,11 @@ cd <skill_dir>/scripts && python3 gerrit_post_checklist.py \
   --checklist-text "<Checklist 内容>"
 ```
 
-Claude 先将填好的 Checklist 写入临时文件，再调用脚本贴到 Gerrit。
+执行 Agent 先将填好的 Checklist 写入临时文件，再调用脚本贴到 Gerrit。
+
+#### 2. 发送飞书通知
+
+Checklist 全部成功贴回后，调用 `feishu_notify.py`（详见 Step 4 章节）。
 
 ### ⚠️ 评审结论 vs Checklist — 概念区分
 
@@ -884,13 +986,13 @@ Claude 先将填好的 Checklist 写入临时文件，再调用脚本贴到 Gerr
 1. **评审结论和 Checklist 都是必需项**，两者都必须展示给用户并贴回 Gerrit，缺一不可
 2. **Step 2 的评审结论不能替代 Step 3 的 Checklist**
 3. **Step 3 的 Checklist 不能省略或简化为评审结论**
-4. **Checklist 完全按模板原样输出**，Claude 不可修改任何内容，包括检查项文字、状态标注、评审结论建议选项
+4. **Checklist 完全按模板原样输出**，执行 Agent 不可修改任何内容，包括检查项文字、状态标注、评审结论建议选项
 
 Checklist 模板中的"评审结论建议"（Approve / Need Info / Request Changes）是 Checklist 自身的一部分，不等同于 Step 2 的评审结论。
 
 ### Checklist 完全固化规则
 
-**Checklist 的全部内容完全固化，Claude 必须严格按模板原样输出，不可做任何修改**：
+**Checklist 的全部内容完全固化，执行 Agent 必须严格按模板原样输出，不可做任何修改**：
 
 - ❌ **禁止做**：
   - 修改、清空或重新判定模板中的预填状态（`✓` / `o` / 空格）— 状态标记按模板原样输出
@@ -901,40 +1003,18 @@ Checklist 模板中的"评审结论建议"（Approve / Need Info / Request Chang
   - 将评审结论的内容插入到 Checklist 中
   - 用评审结论替代 Checklist
 
-Checklist 的状态标注（`✓` / `o`）和评审结论建议的预选已在模板中固化，Claude 直接原样输出，不参与判定。如人工 reviewer 在 Gerrit 上需要调整某项状态，由 reviewer 自行修改。
+Checklist 的状态标注（`✓` / `o`）和评审结论建议的预选已在模板中固化，执行 Agent 直接原样输出，不参与判定。如人工 reviewer 在 Gerrit 上需要调整某项状态，由 reviewer 自行修改。
 
 ### 独立操作
 
-触发 `pipeline checklist <CR编号>` 时，仅执行本步骤。Claude 将 Checklist 模板原样贴出，不做任何标注或修改。
+- 触发 `pipeline checklist <CR编号>` 时，仅执行 Checklist 贴出（不发飞书）。执行 Agent 将 Checklist 模板原样贴出，不做任何标注或修改
+- 触发 `pipeline notify` / `飞书通知` 时，仅发送飞书通知（不贴 Checklist），视为用户已自行确认门禁，跳过合并确认屏
 
 ### 本步骤完成标志
 
-- Gerrit API 返回 200
-- Checklist 已成功贴到 CR 评论中
-
----
-
-## Step 3.5：发送飞书通知前确认
-
-在完整流水线中，执行飞书通知（Step 4）之前，**必须**通过 AskUserQuestion 向用户确认该笔提交已具备可 Review / Merge 的条件。
-
-**确认提示**：
-
-> 即将发送飞书通知，请先确认以下事项：
-> 1. Gerrit 门禁（prebuild / precheck）已通过或正在进行中
-> 2. 所有关联 Change（若有）均已推送并具备合入条件
-> 3. Reviewer 已准备好进行评审
-
-**选项**（通过 AskUserQuestion 展示）：
-
-| 选项 | 行为 |
-|------|------|
-| 确认，发送飞书通知 | 继续执行 Step 4 |
-| 暂不发送，稍后手动触发 | 中止流水线，不发送飞书通知（已完成的提交、评审、Checklist 结果不受影响） |
-
-**多仓库关联提交场景**：在确认提示中列出所有 CR 编号及其当前状态，统一确认后再发送。
-
-**独立操作不受影响**：当用户直接触发 `pipeline notify` / `飞书通知` 时，视为用户已自行确认，跳过本步骤。
+- **Checklist 部分**：所有 CR 的 Gerrit API 均返回 200，Checklist 已成功贴到 CR 评论中
+- **飞书通知部分**：飞书 API 返回成功（卡片已送达目标群）
+- **部分成功**：明确向用户报告哪些子步骤已完成 / 未完成 / 如何补救
 
 ---
 
@@ -947,11 +1027,11 @@ Checklist 的状态标注（`✓` / `o`）和评审结论建议的预选已在�
 
 ### 首次使用引导
 
-当用户输入 `配置 gerrit-pipeline` 或配置文件不存在时，Claude 按以下流程引导用户完成全部配置：
+当用户输入 `配置 gerrit-pipeline` 或配置文件不存在时，执行 Agent 按以下流程引导用户完成全部配置。Claude Code 中推荐使用结构化问答一次完成；其他 Agent 可分步询问，但最终配置文件结构必须一致。
 
 #### 第一阶段：基础配置
 
-通过 AskUserQuestion 逐步收集以下信息：
+通过 `AskUserQuestion` 或等价交互能力逐步收集以下信息：
 
 1. **Gerrit 用户名**
 2. **Gerrit HTTP 密码**（在 Gerrit Settings → HTTP Credentials 中生成）
@@ -960,7 +1040,7 @@ Checklist 的状态标注（`✓` / `o`）和评审结论建议的预选已在�
 5. **提交人邮箱**（用于查询提交人的飞书 open_id，通知卡片中 @提交人）
 6. **@mention 审核人邮箱**（逗号分隔）
 
-收集完成后，Claude 调用脚本自动查询飞书 open_id 并保存配置：
+收集完成后，执行 Agent 调用脚本自动查询飞书 open_id 并保存配置：
 
 ```bash
 cd <skill_dir>/scripts
@@ -978,18 +1058,18 @@ python3 pipeline_config.py lookup-users \
 
 #### 第二阶段：按项目配置（可选）
 
-基础配置完成后，Claude 主动询问用户：
+基础配置完成后，执行 Agent 主动询问用户：
 
 > 你是否负责多个项目，需要按项目区分飞书通知群、审核人或 Reviewer？
 
-**选项**（通过 AskUserQuestion 展示）：
+**选项**（通过 `AskUserQuestion` 或等价交互能力展示）：
 
 | 选项 | 行为 |
 |------|------|
 | 需要，配置项目 | 进入项目配置流程 |
 | 不需要，使用默认配置即可 | 跳过，配置完成 |
 
-如果用户选择「需要」，Claude 循环收集每个项目的配置：
+如果用户选择「需要」，执行 Agent 循环收集每个项目的配置：
 
 1. **项目名称**（如 `D01`、`BAIC`）
 2. **项目专属飞书群 chat_id**（不填则继承顶层默认）
@@ -1021,7 +1101,7 @@ python3 pipeline_config.py list-projects
 python3 pipeline_config.py remove-project --name "D01"
 ```
 
-配置 `projects` 后，Pipeline 在 Step 1 中会通过 AskUserQuestion 让用户选择本次提交所属项目，匹配的项目配置自动覆盖顶层默认值。未配置 `projects` 时使用顶层默认配置，行为与单项目场景完全一致。
+配置 `projects` 后，Pipeline 在 Step 1 中会通过 `AskUserQuestion` 或等价交互能力让用户选择本次提交所属项目，匹配的项目配置自动覆盖顶层默认值。未配置 `projects` 时使用顶层默认配置，行为与单项目场景完全一致。
 
 ### 执行方式
 
@@ -1052,7 +1132,7 @@ cd <skill_dir>/scripts && python3 feishu_notify.py \
   --checklist <pass|warn|fail>
 ```
 
-其中 `<skill_dir>` 为本 skill 的安装路径（如 `~/.claude/skills/gerrit-pipeline`）。`<项目名称>` 为 Step 1 中用户选择的项目名（如 `D01`）。
+其中 `<skill_dir>` 为本 skill 的安装路径；Claude Code 默认通常为 `~/.claude/skills/gerrit-pipeline`，其他 Agent 使用各自的 skill/插件安装目录。`<项目名称>` 为 Step 1 中用户选择的项目名（如 `D01`）。
 
 脚本根据 `--project` 参数精确匹配 `~/.config/gerrit-pipeline/config.json` 中 `projects` 的 key，使用对应的项目专属配置（chat_id、at_members），未匹配或未传 `--project` 时使用顶层默认配置。
 
@@ -1182,7 +1262,7 @@ python3 pipeline_config.py remove-project --name "D01"
 
 ### 独立操作
 
-触发 `pipeline notify` 或 `飞书通知` 时，仅执行本步骤。通过 AskUserQuestion 收集缺少的 CR 信息。
+触发 `pipeline notify` 或 `飞书通知` 时，仅执行本步骤。通过 `AskUserQuestion` 或等价交互能力收集缺少的 CR 信息。
 
 ### 本步骤完成标志
 
@@ -1198,7 +1278,7 @@ python3 pipeline_config.py remove-project --name "D01"
 
 ## Checklist 模板
 
-以下为固化的 AutoLink Code Review Checklist v2.0 模板。**此模板不可变更**，Claude 必须严格按照以下模板输出，不得增删、修改任何检查项、分类、标题、说明文字或格式结构：
+以下为固化的 AutoLink Code Review Checklist v2.0 模板。**此模板不可变更**，执行 Agent 必须严格按照以下模板输出，不得增删、修改任何检查项、分类、标题、说明文字或格式结构：
 
 ```markdown
 ### ✅ AutoLink Code Review Checklist v2.0
@@ -1236,7 +1316,7 @@ python3 pipeline_config.py remove-project --name "D01"
 - [ ] ❌ **Request Changes**（需修改后重新提交）
 ```
 
-> **Claude 必须严格按上述模板原样输出（含预填的 `✓` / `o` 状态标记），不得修改任何文字或重新判定状态。** 如人工 reviewer 在 Gerrit 上需要调整某项状态，由 reviewer 自行修改。
+> **执行 Agent 必须严格按上述模板原样输出（含预填的 `✓` / `o` 状态标记），不得修改任何文字或重新判定状态。** 如人工 reviewer 在 Gerrit 上需要调整某项状态，由 reviewer 自行修改。
 
 ---
 
@@ -1284,23 +1364,36 @@ python3 pipeline_config.py remove-project --name "D01"
 
 ## 注意事项
 
-1. **顺序不可调换**：完整流水线必须按 Step 1 → 2 → 3 → 3.5 → 4 顺序执行
+1. **顺序不可调换**：完整流水线必须按 Step 1 → 2 → 3 → 4 顺序执行；v1.9.0 起 Step 3 吞并的是原 Step 3.5 的确认 UI，不是 Step 4 的执行职责
 2. **CR 编号传递**：Step 1 的输出是后续所有步骤的输入，务必正确提取
 3. **Self-review 限制**：Gerrit 禁止对自己的 CR 打分，评审评论会以不带 Code-Review label 的方式贴出
-4. **Checklist 自动标注**：Claude 根据评审结果自动填写，人工 reviewer 可在 Gerrit 上修改
-5. **失败中止**：Step 1 失败则整个流水线中止；Step 2/3 失败不影响后续步骤；Step 4 失败不影响已完成的提交和评审
+4. **Checklist 模板固化**：执行 Agent 按模板原样输出预填状态，不得依据评审结果自动改写；人工 reviewer 如需调整，可在 Gerrit 上修改
+5. **失败中止**：Step 1 失败则整个流水线中止；Step 2 失败不影响进入 Step 3；Step 3 任一 Checklist 贴回失败则中止 Step 4；Step 4 失败不回滚已完成的 Checklist
 6. **飞书通知**：Step 4 使用内置公共飞书应用，无需额外配置凭证
-7. **独立操作**：每步可单独触发，Claude 会收集缺少的必要信息
+7. **独立操作**：每步可单独触发，执行 Agent 会收集缺少的必要信息
 8. **外部依赖**：Step 2（代码评审）依赖 enhanced_code_review skill，需同步安装；Step 1/3/4 为内置能力，无外部依赖
 
 ---
 
 ## 版本历史
 
+### v1.9.1（2026/5/21）
+
+1. **Agent Neutral 通用性**：新增运行时兼容模型，明确 Claude Code 是推荐运行时，其他 Agent 可通过等价交互能力和脚本调用兼容执行
+2. **保留 Claude Code 优势**：斜杠命令、`AskUserQuestion`、multiSelect、Skill tool 调用作为 Claude Code 优化路径保留，不削弱现有使用体验
+3. **交互抽象统一**：将 JIRA 确认、项目选择、Checklist 责任声明等步骤从 Claude 专属表述调整为 `AskUserQuestion` 或等价交互能力，安全红线不变
+
+### v1.9.0（2026/5/21）
+
+1. **确认 UI 合并**：原 Step 3（Checklist 确认贴出）与原 Step 3.5（飞书通知前确认）合并为单一确认屏；同屏展示 Checklist 预览、飞书通知卡片预览和责任声明
+2. **交互压缩**：新建提交流程不再单独询问"是否多仓库关联提交"，改为预扫描脏仓库后自动判定 Path A / B；提交类型、概要描述、目标分支、开发自测视频改为批量收集
+3. **多仓库确认策略调整**：多仓库关联提交只展示一次固定 Checklist 预览并统一确认，但执行级仍保持逐 CR 串行贴回
+4. **故障边界明确**：任一 Checklist 贴回失败则中止飞书发送；飞书发送失败不回滚已贴出的 Checklist，并要求向用户报告已完成 / 未完成 / 补救命令
+
 ### v1.8.3（2026/5/14）
 
 1. **飞书通知卡片 footer 显示版本号**：单仓库与多仓库关联提交两种卡片底部 note 由「由 Gerrit Pipeline 自动发送」改为「由 Gerrit Pipeline v{版本号} 自动发送」
-2. **版本号动态解析**：`feishu_notify.py` 启动时从同目录上层 `README.md` 头部 `**版本：v1.8.3**` 行解析，发版时只需改 README 一处，footer 自动同步；找不到 README 时 fallback 为 `unknown`，不影响通知发送
+2. **版本号动态解析**：`feishu_notify.py` 启动时从同目录上层 `README.md` 头部版本行解析，发版时只需改 README 一处，footer 自动同步；找不到 README 时 fallback 为 `unknown`，不影响通知发送
 
 ### v1.8.2（2026/5/14）
 
