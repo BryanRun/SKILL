@@ -1459,6 +1459,8 @@ python3 pipeline_config.py remove-project --name "D01"
 
 ## 打包发版流程
 
+### 流程 A：飞书 zip 手动分发
+
 完整发版流程只包含本地校验与 zip 产物生成，**不包含飞书 API 上传**。如需更新飞书文档或上传 zip 文件，由维护者在本地产物生成后手动完成。
 
 对应飞书使用手册：https://t83dfrspj4.feishu.cn/wiki/Tzq1wRg5biiaCLkcx2gcgcb6nO1
@@ -1474,28 +1476,68 @@ python3 -m py_compile \
 
 mkdir -p release
 find release -mindepth 1 -maxdepth 1 -type f -delete
-zip -q release/gerrit-pipeline-v1.9.2.zip \
+zip -q release/gerrit-pipeline-v1.9.3.zip \
   gerrit-pipeline/README.md \
   gerrit-pipeline/SKILL.md \
+  gerrit-pipeline/skill.json \
+  gerrit-pipeline/.skillpackignore \
   gerrit-pipeline/scripts/pipeline_config.py \
   gerrit-pipeline/scripts/feishu_notify.py \
   gerrit-pipeline/scripts/gerrit_post_review.py \
   gerrit-pipeline/scripts/gerrit_post_checklist.py
 
-unzip -l release/gerrit-pipeline-v1.9.2.zip
-sha256sum release/gerrit-pipeline-v1.9.2.zip
+unzip -l release/gerrit-pipeline-v1.9.3.zip
+sha256sum release/gerrit-pipeline-v1.9.3.zip
 
 git status --short
 git add -A
-git commit -m "release: gerrit-pipeline v1.9.2"
+git commit -m "release: gerrit-pipeline v1.9.3"
 git push origin "$(git branch --show-current)"
 ```
 
 其中 `git commit` / `git push` 是完整发版流程的最后一步，必须在本地文档、飞书文档和 zip 产物都确认完成后执行。
 
+### 流程 B：SkillPack 发布
+
+SkillPack 发布使用 `skill.json` 作为版本与元数据 SOT。`platform` 覆盖 `her`、`cursor`、`claude-code`、`codex` 和通用 `agent`，表示该 skill 面向多 Agent 通用。发布包必须由 SkillPack 客户端生成 tar.gz，包根目录直接包含 `SKILL.md`、`skill.json`、`README.md` 和 `scripts/`，不得带 `gerrit-pipeline/` 目录前缀。
+
+```bash
+python3 -m py_compile \
+  gerrit-pipeline/scripts/feishu_notify.py \
+  gerrit-pipeline/scripts/gerrit_post_checklist.py \
+  gerrit-pipeline/scripts/gerrit_post_review.py \
+  gerrit-pipeline/scripts/pipeline_config.py
+
+export SKILLPACK_SKILLS_ROOT="$(pwd)"
+
+# 预检打包结构：tarball 根目录必须直接包含 SKILL.md 与 skill.json
+bash ~/.openclaw/workspace/skills/skillpack-client/scripts/pack-skill.sh \
+  gerrit-pipeline \
+  --skills-root "$SKILLPACK_SKILLS_ROOT"
+
+# 正式发布：wrapper 会依次执行 telemetry pre、SkillPack lint、publish、telemetry post
+bash ~/.openclaw/workspace/skills/skillpack-client/scripts/publish-with-telemetry.sh \
+  gerrit-pipeline \
+  --changelog "gerrit-pipeline v1.9.3"
+
+git status --short
+git add -A
+git commit -m "release: gerrit-pipeline v1.9.3"
+git push origin "$(git branch --show-current)"
+```
+
+流程 B 不生成飞书 zip，也不通过飞书 API 上传文件；它只负责通过 SkillPack 发布 skill 版本。`git commit` / `git push` 仍是流程 B 的最后一步，必须在 SkillPack lint / publish 成功后执行。
+
 ---
 
 ## 版本历史
+
+### v1.9.3（2026/5/25）
+
+1. **SkillPack 兼容适配**：新增 `skill.json` 作为版本与元数据 SOT，补齐 `trigger_keywords`、`requires`、`eval_cases`、`changelog` 等发布字段
+2. **发布包控制**：新增 `.skillpackignore`，避免 `release/`、`__pycache__`、`.source.json` 等非分发内容进入 SkillPack 包
+3. **多 Agent 平台声明**：`platform` 覆盖 `her`、`cursor`、`claude-code`、`codex` 和通用 `agent`
+4. **发版流程拆分**：保留流程 A（飞书 zip 手动分发），新增流程 B（SkillPack lint / 打包 / 发布）；README 与飞书文档仅保留简要说明，具体执行命令保留在本文件
 
 ### v1.9.2（2026/5/25）
 

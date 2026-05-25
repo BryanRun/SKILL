@@ -1,0 +1,82 @@
+{
+  "name": "gerrit-pipeline",
+  "version": "1.9.3",
+  "description": "Gerrit Pipeline 是面向 AutoLink Gerrit 代码提交流程的一键评审流水线 skill，串联代码提交、自动代码评审、Checklist 贴回和飞书通知，支持新建提交、amend、cherry-pick、多仓 topic 关联提交、项目差异化配置和 Agent Neutral 运行方式。适用于需要统一 commit message、Code Review、Checklist 与飞书通知闭环的研发提交流程。",
+  "author": "Hualei",
+  "maintainer": "Hualei",
+  "platform": [
+    "her",
+    "cursor",
+    "claude-code",
+    "codex",
+    "agent"
+  ],
+  "tags": [
+    "gerrit",
+    "code-review",
+    "pipeline",
+    "feishu",
+    "checklist",
+    "multi-repo",
+    "topic",
+    "commit-message"
+  ],
+  "status": "published",
+  "trigger_keywords": [
+    "gerrit pipeline",
+    "gp",
+    "一键提交",
+    "提交并评审",
+    "submit and review",
+    "一键提交评审",
+    "pipeline submit",
+    "gerrit submit",
+    "gerrit push",
+    "gerrit amend",
+    "gerrit cherry-pick",
+    "提交到gerrit",
+    "推送代码",
+    "提交代码审查",
+    "提交CR",
+    "pipeline review",
+    "pipeline checklist",
+    "pipeline notify",
+    "飞书通知"
+  ],
+  "anti_triggers": [],
+  "requires": {
+    "tools": [
+      "shell",
+      "python3",
+      "git"
+    ],
+    "skills": [
+      "enhanced_code_review"
+    ],
+    "env": {}
+  },
+  "eval_cases": [
+    {
+      "input": "gerrit pipeline",
+      "expected_output": "按 Step 1 → Step 2 → Step 3 → Step 4 执行完整流水线，并在必要节点向用户确认提交模式、JIRA-ID、commit message 和合并确认。"
+    },
+    {
+      "input": "pipeline submit 当前仓库",
+      "expected_output": "进入代码提交流程，按显式单仓意图只处理当前仓库，生成规范 commit message 并 push 到 Gerrit。"
+    },
+    {
+      "input": "多仓关联提交 topic",
+      "expected_output": "进入多仓库关联提交路径，收集或确认参与仓库，生成统一 topic，并按顺序提交多个 Gerrit Change。"
+    },
+    {
+      "input": "pipeline notify",
+      "expected_output": "收集 CR 编号、评审结果和 Checklist 状态，调用 feishu_notify.py 发送飞书 interactive card。"
+    }
+  ],
+  "changelog": [
+    "v1.9.3: 适配 SkillPack 发布规范，新增 skill.json 与 .skillpackignore，声明多 Agent 通用平台，并新增 SkillPack 发布流程。",
+    "v1.9.2: 提交范围判定改为显式意图优先，收敛全局扫描，飞书通知标题保真，并固化本地发版流程。",
+    "v1.9.1: 增强 Agent Neutral 兼容说明，保留 Claude Code 优化路径并明确等价交互能力。",
+    "v1.9.0: 合并 Checklist 与飞书通知前确认屏，压缩交互并保留执行级故障边界。"
+  ]
+}
