@@ -120,6 +120,15 @@ def _build_at_text(at_members):
     return " ".join(parts)
 
 
+def _escape_link_text(text):
+    """Escape Markdown link label syntax while keeping rendered text unchanged."""
+    return str(text).replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
+
+
+def _md_link(text, url):
+    return f"[{_escape_link_text(text)}]({url})"
+
+
 def build_card(args, at_members=None, submitter=None):
     if args.topic:
         return build_topic_card(args, at_members=at_members, submitter=submitter)
@@ -150,7 +159,7 @@ def build_single_card(args, at_members=None, submitter=None):
     elements = [
         {
             "tag": "div",
-            "text": {"tag": "lark_md", "content": f"**提交概要**\n[{args.subject}]({args.url})"},
+            "text": {"tag": "lark_md", "content": f"**提交概要**\n{_md_link(args.subject, args.url)}"},
         },
         {
             "tag": "div",
@@ -249,7 +258,7 @@ def build_topic_card(args, at_members=None, submitter=None):
     elements = [
         {
             "tag": "div",
-            "text": {"tag": "lark_md", "content": f"**提交概要**\n[{args.subject}]({topic_url})"},
+            "text": {"tag": "lark_md", "content": f"**提交概要**\n{_md_link(args.subject, topic_url)}"},
         },
         {
             "tag": "div",
@@ -319,7 +328,7 @@ def main():
     ap.add_argument("--cr", required=True, help="CR 编号（多仓库时逗号分隔）")
     ap.add_argument("--url", required=True, help="Gerrit Change URL（多仓库时逗号分隔）")
     ap.add_argument("--branch", default="al_dev", help="目标分支")
-    ap.add_argument("--subject", required=True, help="提交标题")
+    ap.add_argument("--subject", required=True, help="提交标题，必须与 commit message 第一行完全一致")
     ap.add_argument("--topic", default=None, help="Topic 名称（多仓库关联提交时必填）")
     ap.add_argument("--repos", default=None, help="各 CR 对应仓库名，逗号分隔（多仓库时必填，与 --cr 一一对应）")
     ap.add_argument("--score", type=int, default=1, help="评审评分 (-1/0/1)")

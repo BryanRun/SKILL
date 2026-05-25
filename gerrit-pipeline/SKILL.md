@@ -526,13 +526,86 @@ git commit --amend（仅修正 message，不改变代码）
 > **不可基于 git 状态自动推断提交模式**：Amend / Cherry-pick / 新建提交的后续字段差异大（如 Amend 不需要"提交类型/概要"），误判代价高，必须由用户显式选择。
 
 确认提交模式后，根据模式进入对应流程：
-- **新建提交**：继续第二步（预扫描决定路径），然后走路径 A / B
+- **新建提交**：继续第二步（提交范围判定），然后走路径 A / B
 - **Amend**：跳过预扫描，直接走路径 C（Amend 流程）
 - **Cherry-pick**：跳过预扫描，直接走路径 D（Cherry-pick 流程）
 
-#### 第二步：预扫描决定 Path A / B（**不再询问"是否多仓库"**）
+#### 第二步：提交范围判定（显式优先，扫描兜底）
 
-仅在新建提交模式下执行。执行 Agent 在进入路径分支前**先扫描脏仓库**：
+仅在新建提交模式下执行。执行 Agent 必须按以下优先级判定本次进入路径 A / B：
+
+##### 2.1 显式多仓触发词
+
+如果用户触发词中明确包含以下任一关键词，直接进入路径 B（多仓库关联提交）：
+
+- `多仓`
+- `多仓库`
+- `多仓提交`
+- `多仓库提交`
+- `关联提交`
+- `topic`
+
+此时不进入单仓路径。若用户同时提供了仓库路径，以用户提供的路径作为候选列表；若未提供路径，则进入多仓候选收集流程。
+
+##### 2.2 用户显式提供仓库路径
+
+如果用户在触发 skill 时直接提供了仓库路径地址，**不执行全局扫描**，按路径数量决定路径：
+
+| 用户提供的仓库路径数量 | 自动进入 | 备注 |
+|------------------------|----------|------|
+| 1 个仓库路径 | 路径 A（单仓库） | 仅在该仓库内提交 |
+| ≥2 个仓库路径 | 路径 B（多仓库关联提交） | 这些路径作为多仓候选列表，后续仍需用户确认参与范围和顺序 |
+
+执行 Agent 必须先将相对路径规范化为绝对路径，并校验每个路径是 Git 仓库或位于 Git 仓库内；无法识别的路径必须提示用户修正，不得静默忽略。
+
+##### 2.3 显式单仓触发词
+
+如果用户触发词中明确包含以下任一关键词，直接进入路径 A（单仓库提交），以当前仓库或用户提供的单个仓库路径为提交目标：
+
+- `单仓`
+- `单仓库`
+- `单仓提交`
+- `单仓库提交`
+- `只提交当前仓库`
+- `仅提交当前仓库`
+- `当前仓库提交`
+
+这些关键词必须按字面匹配，不得把普通的 `提交`、`推送`、`代码提交`、`提交代码` 模糊理解为单仓意图。
+
+##### 2.4 意图冲突处理
+
+如果用户同时表达互相冲突的意图（例如同时包含 `单仓` 和 `多仓`，或声明单仓但提供两个及以上仓库路径），执行 Agent 必须暂停并向用户确认提交范围，不得自行选择路径。
+
+##### 2.5 无显式意图、无仓库路径时的兜底策略
+
+仅当用户既未提供仓库路径，也未包含明确单仓 / 多仓触发词时，执行 Agent 按当前目录上下文决定是否扫描。
+
+**当前目录不是 Git 仓库，也不在 Git 仓库内**：
+
+- 不执行全局扫描
+- 提示用户提供仓库路径，或切换到目标仓库目录后重新触发
+
+**当前目录是普通单 Git 仓库，且不属于 repo / manifest workspace**：
+
+- 只执行当前仓库 `git status --porcelain`
+- 当前仓库无变更：中止并提示无可提交变更
+- 当前仓库有变更：进入路径 A（单仓库）
+
+**当前目录位于 repo / manifest workspace 内**：
+
+1. 先定位 workspace 根目录
+2. 先检测当前仓库是否有变更
+3. 通过 `AskUserQuestion` 或等价交互能力询问提交范围：
+
+   | 选项 | 行为 |
+   |------|------|
+   | 仅提交当前仓库 | 直接进入路径 A，不扫描整个 workspace |
+   | 扫描整个 workspace | 从 workspace 根目录扫描所有脏仓库，再按扫描结果进入路径 A / B |
+   | 手动指定仓库路径 | 让用户输入仓库路径，按路径数量进入路径 A / B |
+
+> 默认推荐选项为「仅提交当前仓库」，避免普通提交流程被全局扫描拖慢；当用户确实需要多仓库关联提交时，再选择「扫描整个 workspace」或手动提供路径。
+
+**全局扫描命令**：
 
 ```bash
 # manifest 管理的工作区
@@ -542,15 +615,24 @@ repo forall -c 'if [ -n "$(git status --porcelain)" ]; then echo "$(pwd)"; fi'
 git status --porcelain
 ```
 
-根据扫描结果**自动**决定路径，不再向用户询问：
+**全局扫描超时策略**：
+
+- 初次扫描超时时间为 **20 秒**
+- 20 秒内未完成时，不继续阻塞流程，必须提示用户选择：
+
+  | 选项 | 行为 |
+  |------|------|
+  | 仅提交当前仓库 | 中止扫描，进入路径 A |
+  | 手动指定仓库路径 | 中止扫描，按用户提供路径数量进入路径 A / B |
+  | 继续等待 / 重试扫描 | 继续或重新执行全局扫描 |
+
+**扫描结果处理规则**：
 
 | 扫描结果 | 自动进入 | 备注 |
 |---------|---------|------|
 | 1 个脏仓库 | 路径 A（单仓库） | 不询问"是否多仓库" |
-| ≥2 个脏仓库 | 路径 B（多仓库关联提交） | 不询问"是否多仓库"；扫描结果作为 multiSelect 候选项呈现给用户，由用户明确选择参与仓库 |
+| ≥2 个脏仓库 | 路径 B（多仓库关联提交） | 扫描结果作为 multiSelect 候选项呈现给用户，由用户明确选择参与仓库；不得静默纳入全部脏仓库 |
 | 0 个脏仓库 | 报错中止 | 提示用户先暂存或修改文件 |
-
-> **触发关键词覆盖**：若用户触发词中已含 "关联提交"、"多仓库"、"topic"、明确给出 topic 名称等关键词，无视扫描结果直接进入路径 B。
 
 ---
 
@@ -1125,7 +1207,7 @@ cd <skill_dir>/scripts && python3 feishu_notify.py \
   --cr <CR编号1>,<CR编号2>,... \
   --url "<URL1>,<URL2>,..." \
   --branch <目标分支> \
-  --subject "<共享概要描述>" \
+  --subject "<提交标题>" \
   --project "<项目名称>" \
   --score <最低评审评分> \
   --p0 <P0总数> --p1 <P1总数> --p2 <P2总数> --p3 <P3总数> \
@@ -1143,7 +1225,7 @@ cd <skill_dir>/scripts && python3 feishu_notify.py \
 | `--cr` | 是 | CR 编号 | Step 1 输出 |
 | `--url` | 是 | Gerrit Change URL | Step 1 输出 |
 | `--branch` | 否 | 目标分支（默认 al_dev） | Step 1 输出 |
-| `--subject` | 是 | 提交标题（commit message 首行） | Step 1 输出 |
+| `--subject` | 是 | 提交标题，必须与 commit message 第一行完全一致，不得改写、压缩或替换为概要描述 | Step 1 输出 |
 | `--score` | 否 | 评审评分 -1/0/1（默认 1） | Step 2 输出 |
 | `--p0` ~ `--p3` | 否 | 各级别问题数（默认 0） | Step 2 输出 |
 | `--checklist` | 否 | Checklist 状态 pass/warn/fail（默认 pass） | Step 3 输出 |
@@ -1230,7 +1312,7 @@ python3 pipeline_config.py remove-project --name "D01"
 #### 单仓库提交卡片
 
 - **标题**：Gerrit Pipeline 通知（颜色随评审结果变化：绿/橙/红）
-- **提交概要**：以链接形式展示，点击跳转到 Gerrit Change URL
+- **提交概要**：以链接形式展示，点击跳转到 Gerrit Change URL；显示文本必须与 commit message 第一行完全一致
 - **CR 编号** + **分支**
 - **提交人** + **提交日期**
 - **评审评分** + **问题统计**
@@ -1242,7 +1324,7 @@ python3 pipeline_config.py remove-project --name "D01"
 当传入 `--topic` 参数时，使用多仓库卡片格式：
 
 - **标题**：Gerrit Pipeline 通知 — 关联提交（颜色随最低评审评分变化）
-- **提交概要**：以链接形式展示，点击跳转到 Gerrit Topic 搜索页
+- **提交概要**：以链接形式展示，点击跳转到 Gerrit Topic 搜索页；显示文本必须来自 Step 1 传入的 commit message 标题，不得改写为概要描述
 - **Topic** + **分支**
 - **提交人** + **提交日期**
 - **评审评分** + **问题统计**
@@ -1375,7 +1457,54 @@ python3 pipeline_config.py remove-project --name "D01"
 
 ---
 
+## 打包发版流程
+
+完整发版流程只包含本地校验与 zip 产物生成，**不包含飞书 API 上传**。如需更新飞书文档或上传 zip 文件，由维护者在本地产物生成后手动完成。
+
+对应飞书使用手册：https://t83dfrspj4.feishu.cn/wiki/Tzq1wRg5biiaCLkcx2gcgcb6nO1
+
+执行打包前必须先清空仓库根目录下的 `release/` 目录，再生成当前版本 zip 包，确保 `release/` 中只保留本次发布产物：
+
+```bash
+python3 -m py_compile \
+  gerrit-pipeline/scripts/feishu_notify.py \
+  gerrit-pipeline/scripts/gerrit_post_checklist.py \
+  gerrit-pipeline/scripts/gerrit_post_review.py \
+  gerrit-pipeline/scripts/pipeline_config.py
+
+mkdir -p release
+find release -mindepth 1 -maxdepth 1 -type f -delete
+zip -q release/gerrit-pipeline-v1.9.2.zip \
+  gerrit-pipeline/README.md \
+  gerrit-pipeline/SKILL.md \
+  gerrit-pipeline/scripts/pipeline_config.py \
+  gerrit-pipeline/scripts/feishu_notify.py \
+  gerrit-pipeline/scripts/gerrit_post_review.py \
+  gerrit-pipeline/scripts/gerrit_post_checklist.py
+
+unzip -l release/gerrit-pipeline-v1.9.2.zip
+sha256sum release/gerrit-pipeline-v1.9.2.zip
+
+git status --short
+git add -A
+git commit -m "release: gerrit-pipeline v1.9.2"
+git push origin "$(git branch --show-current)"
+```
+
+其中 `git commit` / `git push` 是完整发版流程的最后一步，必须在本地文档、飞书文档和 zip 产物都确认完成后执行。
+
+---
+
 ## 版本历史
+
+### v1.9.2（2026/5/25）
+
+1. **提交范围判定重构**：新建提交从“预扫描自动判路”调整为“显式意图优先，扫描兜底”；`多仓`、`关联提交`、`topic` 等关键词直接进入路径 B，显式仓库路径按数量判定单仓 / 多仓，`单仓`、`仅提交当前仓库` 等关键词直接进入路径 A
+2. **全局扫描收敛**：无显式意图时，普通 Git 仓库只检查当前仓库；repo / manifest workspace 先让用户选择仅当前仓库、扫描整个 workspace 或手动指定仓库路径，并为全局扫描增加 20 秒超时后的范围选择
+3. **飞书通知标题保真**：`--subject` 必须与 commit message 第一行完全一致，单仓与多仓通知卡片的提交概要显示文本不得改写为概要描述
+4. **Markdown 链接安全**：飞书卡片构造链接时转义提交标题中的 `\`、`[`、`]`，避免特殊字符破坏 `lark_md` 链接格式
+5. **发版流程固化**：完整发版流程只生成本地 zip 产物，不包含飞书 API 上传；生成新产物前必须先清空 `release/` 目录；流程最后提交并推送当前仓库全部改动
+6. **飞书文档链接固化**：在发版流程中固定记录 gerrit-pipeline 使用手册链接，避免后续遗漏块级更新
 
 ### v1.9.1（2026/5/21）
 
