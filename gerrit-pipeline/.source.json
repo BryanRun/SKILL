@@ -2,7 +2,9 @@
   "from": "skillpack",
   "skill_id": "2aa40d32b8a14679bbb3b00eb752830f",
   "name": "gerrit-pipeline",
-  "version": "1.9.4",
+  "version": "1.9.5",
   "role": "publisher",
-  "installed_at": "2026-05-25T09:21:40Z"
+  "installed_at": "2026-05-29T02:54:56Z",
+  "server_url": "https://skills.auto-link.com.cn/skillpack",
+  "content_checksum": "sha256:a91d46da202f4b5e8886021ef2e09103b30e8e8f1e7170be97c1c74516772023"
 }

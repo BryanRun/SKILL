@@ -1,6 +1,6 @@
 # gerrit-pipeline — 使用说明
 
-**版本：v1.9.4**
+**版本：v1.9.5**
 
 gerrit-pipeline 是一个 Claude Code 优先、Agent Neutral 兼容的 Skill，为车联 AutoLink 团队提供 Gerrit 代码提交评审一站式自动化能力。Claude Code 中可获得最佳体验：斜杠命令、结构化确认、多选、Skill 调用都能直接串联；其他 Agent 只要支持读取 skill 文档、执行脚本、与用户确认/选择，也可以按同一流程执行。v1.9.0 起，原 Step 3（Checklist 确认）与原 Step 3.5（飞书通知前确认）合并为单一确认屏，在不降低安全红线的前提下减少交互弹窗。目标是减少重复操作、统一提交规范、加速 Code Review 闭环。
 
@@ -263,7 +263,7 @@ python3 pipeline_config.py remove-project --name "D01"
 
 ## 8. 版本下载
 
-最新版本及历史版本下载：[gerrit-pipeline-v1.9.4.zip](https://t83dfrspj4.feishu.cn/wiki/Urrkw0A72if06ykzcmFcSdsrnag)
+最新版本及历史版本下载：[gerrit-pipeline-v1.9.5.zip](https://t83dfrspj4.feishu.cn/wiki/Urrkw0A72if06ykzcmFcSdsrnag)
 
 ### 8.1 本地打包发版流程
 
@@ -276,6 +276,7 @@ python3 pipeline_config.py remove-project --name "D01"
 
 | 版本 | 日期 | 变更摘要 |
 |------|------|---------|
+| v1.9.5 | 2026-05-29 | 1. AutoLink Code Review Checklist 升级为 `v2.1`，固定模板从 12 项扩展为 13 项<br>2. 流程合规新增“代码影响”检查项，要求共享代码、公共模块、平台化组件变更说明影响项目和验证范围<br>3. 同步更新 Step 3 Checklist 展示、贴回和评审结论区分说明 |
 | v1.9.4 | 2026-05-25 | 1. 将 SkillPack 发布平台切换为 `claude-code`，重新发布 Claude Code 通道版本<br>2. 保留 `her`、`cursor`、`codex` 和通用 `agent` 兼容性说明，避免误将兼容范围写入 SkillPack 单平台字段 |
 | v1.9.3 | 2026-05-25 | 1. 适配 SkillPack 发布规范：新增 `skill.json` 作为版本与元数据 SOT，新增 `.skillpackignore` 控制发布包内容<br>2. 当前 SkillPack 发布通道声明为 `her`；同时在描述与标签中说明 `cursor`、`claude-code`、`codex` 和通用 `agent` 兼容性<br>3. 新增发版流程 B：通过 SkillPack 客户端执行 lint、打包与发布；README 与飞书文档仅保留流程 A/B 的简要说明 |
 | v1.9.2 | 2026-05-25 | 1. 提交范围判定改为显式意图优先：多仓关键词直接进入关联提交，显式仓库路径按数量判定，单仓关键词只提交当前仓库<br>2. 无显式意图时避免默认全局扫描：普通 Git 仓库只检查当前仓库，repo workspace 先询问范围，并为全局扫描增加 20 秒超时处理<br>3. 飞书通知提交概要严格使用 commit message 第一行，并转义 Markdown 链接文本，避免标题中的 `[`、`]`、`\` 破坏卡片链接<br>4. 固化本地发版流程：发版只生成本地 zip，不包含飞书 API 上传；生成产物前必须清空 `release/` 目录；流程最后提交并推送当前仓库全部改动<br>5. 固化飞书使用手册链接，避免后续发版遗漏文档块级更新 |

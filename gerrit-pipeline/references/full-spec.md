@@ -964,7 +964,7 @@ cd <skill_dir>/scripts && python3 gerrit_post_review.py \
    - **禁止省略、截断或简化 Checklist 内容**
    - **禁止修改任何检查项的文字描述**
    - **状态标记按模板原样输出**：模板已预填 `✓` / `o` / 空格，执行 Agent 不得清空、修改或重新判定
-   - 必须包含模板中的所有 12 项检查项（流程合规 3 项 + 测试验证 4 项 + 平台化 4 项 + 安全合规 1 项）
+   - 必须包含模板中的所有 13 项检查项（流程合规 4 项 + 测试验证 4 项 + 平台化 4 项 + 安全合规 1 项）
    - 必须包含评审结论建议的 3 个选项（Approve / Need Info / Request Changes）
 
 2. **多仓库场景**：Checklist 是固定模板，**只展示 1 份 Checklist 预览**；用户确认后，将同一份 Checklist 模板分别贴到 Step 1 产出的每个 CR 中
@@ -1058,10 +1058,10 @@ Checklist 全部成功贴回后，调用 `feishu_notify.py`（详见 Step 4 章�
 | | 评审结论（Step 2 产出） | Checklist（Step 3 产出） |
 |---|---|---|
 | **来源** | Step 2 代码评审的输出 | Step 3 独立的检查清单 |
-| **内容** | 代码评审的评分（+1/0/-1）和问题统计（P0-P3） | 12 项合规检查 + 评审结论建议 |
+| **内容** | 代码评审的评分（+1/0/-1）和问题统计（P0-P3） | 13 项合规检查 + 评审结论建议 |
 | **作用** | 评价代码质量 | 确认流程合规、测试验证、平台化、安全合规 |
 | **贴到 Gerrit** | **必需**，以评审评论形式贴出 | **必需**，以 Checklist 评论形式贴出 |
-| **展示给用户** | **必需**，完整展示评审结论 | **必需**，完整展示全部 12 项 |
+| **展示给用户** | **必需**，完整展示评审结论 | **必需**，完整展示全部 13 项 |
 | **是否可修改** | 根据代码评审结果生成 | **完全固化，不可修改（包括状态标注）** |
 
 **关键原则**：
@@ -1360,13 +1360,13 @@ python3 pipeline_config.py remove-project --name "D01"
 
 ## Checklist 模板
 
-以下为固化的 AutoLink Code Review Checklist v2.0 模板。**此模板不可变更**，执行 Agent 必须严格按照以下模板输出，不得增删、修改任何检查项、分类、标题、说明文字或格式结构：
+以下为固化的 AutoLink Code Review Checklist v2.1 模板。**此模板不可变更**，执行 Agent 必须严格按照以下模板输出，不得增删、修改任何检查项、分类、标题、说明文字或格式结构：
 
 ```markdown
-### ✅ AutoLink Code Review Checklist v2.0
+### ✅ AutoLink Code Review Checklist v2.1
 *适用于Gerrit评审 | AI已完成预审的精简版 | 推荐在每项前打 `✓` 或`x` 或添加评论说明，然后复制粘贴在Gerrit评论中*
 > **说明**：此Checklist用于AI本地评审通过后的人工评审阶段。AI已自动检查编码风格、命名规范、
-> 编译冲突、提交信息等8项，人工只需聚焦以下12项。若某项不适用（`若有`或`可选`），请标注 `o`。
+> 编译冲突、提交信息等8项，人工只需聚焦以下13项。若某项不适用（`若有`或`可选`），请标注 `o`。
 
 ---
 
@@ -1374,6 +1374,7 @@ python3 pipeline_config.py remove-project --name "D01"
 - [✓] **任务关联**：填写有效的JIRA任务或BUG编号，非关联任务不能反复用同一个JIRA单
 - [✓] **分支关联**：需要提交的分支（如release分支）都已Cherry pick（若有）
 - [o] **提交关联**：拉齐有关联或依赖的相关方代码提交，并关联了同一个Topic（若有）
+- [✓] **代码影响**：涉及共享代码/公共模块/平台化组件时，已说明影响项目和验证范围（若有）
 
 #### 🧪 测试验证
 - [✓] **功能测试**：预期功能或问题缺陷的测试验证通过，测试报告已提交到Jira单
@@ -1476,7 +1477,7 @@ python3 -m py_compile \
 
 mkdir -p release
 find release -mindepth 1 -maxdepth 1 -type f -delete
-zip -q release/gerrit-pipeline-v1.9.4.zip \
+zip -q release/gerrit-pipeline-v1.9.5.zip \
   gerrit-pipeline/README.md \
   gerrit-pipeline/SKILL.md \
   gerrit-pipeline/skill.json \
@@ -1486,12 +1487,12 @@ zip -q release/gerrit-pipeline-v1.9.4.zip \
   gerrit-pipeline/scripts/gerrit_post_review.py \
   gerrit-pipeline/scripts/gerrit_post_checklist.py
 
-unzip -l release/gerrit-pipeline-v1.9.4.zip
-sha256sum release/gerrit-pipeline-v1.9.4.zip
+unzip -l release/gerrit-pipeline-v1.9.5.zip
+sha256sum release/gerrit-pipeline-v1.9.5.zip
 
 git status --short
 git add -A
-git commit -m "release: gerrit-pipeline v1.9.4"
+git commit -m "release: gerrit-pipeline v1.9.5"
 git push origin "$(git branch --show-current)"
 ```
 
@@ -1518,11 +1519,11 @@ bash ~/.openclaw/workspace/skills/skillpack-client/scripts/pack-skill.sh \
 # 正式发布：wrapper 会依次执行 telemetry pre、SkillPack lint、publish、telemetry post
 bash ~/.openclaw/workspace/skills/skillpack-client/scripts/publish-with-telemetry.sh \
   gerrit-pipeline \
-  --changelog "gerrit-pipeline v1.9.4"
+  --changelog "gerrit-pipeline v1.9.5"
 
 git status --short
 git add -A
-git commit -m "release: gerrit-pipeline v1.9.4"
+git commit -m "release: gerrit-pipeline v1.9.5"
 git push origin "$(git branch --show-current)"
 ```
 
@@ -1531,6 +1532,12 @@ git push origin "$(git branch --show-current)"
 ---
 
 ## 版本历史
+
+### v1.9.5（2026/5/29）
+
+1. **Checklist v2.1**：AutoLink Code Review Checklist 固定模板升级为 v2.1，检查项总数从 12 项扩展为 13 项
+2. **代码影响检查**：流程合规新增“代码影响”检查项，涉及共享代码、公共模块、平台化组件时必须说明影响项目和验证范围
+3. **文档同步**：Step 3 Checklist 展示、贴回要求和“评审结论 vs Checklist”概念区分同步改为 13 项
 
 ### v1.9.4（2026/5/25）
 
