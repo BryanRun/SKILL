@@ -1,6 +1,6 @@
 {
   "name": "gerrit-pipeline",
-  "version": "1.9.5",
+  "version": "1.9.6",
   "description": "Gerrit Pipeline 是面向 AutoLink Gerrit 代码提交流程的一键评审流水线 skill，串联代码提交、自动代码评审、Checklist 贴回和飞书通知，支持新建提交、amend、cherry-pick、多仓 topic 关联提交、项目差异化配置和 Agent Neutral 运行方式。适用于 Her、Cursor、Claude Code、Codex 及其他具备 shell/Python 执行能力的 agent，用于统一 commit message、Code Review、Checklist 与飞书通知闭环。",
   "author": "Hualei",
   "maintainer": "Hualei",
@@ -74,6 +74,7 @@
     }
   ],
   "changelog": [
+    "v1.9.6: 放开 Gerrit Pipeline JIRA-ID 前缀白名单，改为通用 Jira Key 形态校验，提升新增项目兼容性。",
     "v1.9.5: 升级 AutoLink Code Review Checklist 到 v2.1，新增代码影响检查项，并同步 13 项 Checklist 展示、贴回和文档说明。",
     "v1.9.4: 将 SkillPack 发布平台切换为 claude-code，重新发布 Claude Code 通道版本，并保留 Her、Cursor、Codex 和其他 agent 的兼容性说明。",
     "v1.9.3: 适配 SkillPack 发布规范，新增 skill.json 与 .skillpackignore，首次通过 SkillPack 发布 her 通道版本，并在描述与标签中说明 Claude Code、Cursor、Codex 和其他 agent 兼容性。",

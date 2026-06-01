@@ -130,7 +130,7 @@ export GERRIT_HTTP_PASSWORD="{Step 1 已读取的 gerrit.http_password}"
   - `bug`：缺陷修复
   - `change`：需求变更
   - `feature`：新功能开发
-- **JIRA-ID**：JIRA ticket 编号，用 `【】` 包裹，必须在 JIRA 上真实存在。已知前缀：`CHYT1V` / `BAIC` / `KP31` / `CL` / `T1V` / `D01` / `XINCHI` 等
+- **JIRA-ID**：JIRA ticket 编号，用 `【】` 包裹，必须在 JIRA 上真实存在。前缀不做白名单限制，按通用 Jira Key 形态校验：项目 Key 以大写字母开头，可包含大写字母和数字，后接 `-` 与数字编号，例如 `CHYT1V-1058`、`D01-123`
 - **概要描述**：简明扼要说明改动内容
 - **【x/y】**（多仓库关联提交时必填）：关联提交序号标识，x 为当前提交序号，y 为总笔数，均为正整数。`【】` 为中文方括号。非关联提交时省略
 
@@ -256,7 +256,7 @@ echo "$topic_name" | grep -qE '^[A-Za-z0-9_-]+$' || echo "ERROR: Topic 名称包
 在 commit 之前或之后，检查 commit message 是否符合规范：
 
 1. **标题**：以 `【bug】`、`【change】` 或 `【feature】` 开头
-2. **JIRA-ID**：标题中包含有效的 JIRA ticket 编号
+2. **JIRA-ID**：标题中包含有效的 JIRA ticket 编号，按通用 Jira Key 形态校验，不限制具体项目前缀
 3. **【x/y】标识**（如存在）：x、y 为正整数，x ≤ y，`【】` 为中文方括号
 4. **Body 字段完整性**：确认 4 个门禁必检字段均存在且满足最低字数
    - 【原因分析】≥ 8 字
@@ -277,8 +277,8 @@ msg=$(git log -1 --format="%B")
 # 检查标题格式（【类型】【JIRA-ID】概要描述）
 echo "$msg" | head -1 | grep -qE '^【(bug|change|feature)】【' || echo "ERROR: 标题格式不符"
 
-# 检查 JIRA-ID（已知前缀，需被【】包裹）
-echo "$msg" | head -1 | grep -qE '【(CHYT1V|BAIC|KP31|CL|T1V|D01|XINCHI)-[0-9]+】' || echo "ERROR: 缺少 JIRA-ID 或未用【】包裹"
+# 检查 JIRA-ID（通用 Jira Key 形态，需被【】包裹，不限制具体项目前缀）
+echo "$msg" | head -1 | grep -qE '【[A-Z][A-Z0-9]*-[0-9]+】' || echo "ERROR: 缺少 JIRA-ID、格式不符或未用【】包裹"
 
 # 检查【x/y】标识格式（如存在）
 title=$(echo "$msg" | head -1)
@@ -462,7 +462,7 @@ git commit --amend（仅修正 message，不改变代码）
 | # | 校验项 | 判定规则 | 失败严重性 |
 |---|--------|---------|-----------|
 | 1 | 标题格式 | 以 `【bug】`、`【change】` 或 `【feature】` 开头 | 阻塞 |
-| 2 | JIRA-ID | 标题中包含有效 JIRA ticket 编号，用 `【】` 包裹 | 阻塞 |
+| 2 | JIRA-ID | 标题中包含有效 JIRA ticket 编号，用 `【】` 包裹，按通用 Jira Key 形态校验，不限制具体项目前缀 | 阻塞 |
 | 3 | 【x/y】标识 | 如存在，x、y 为正整数，x ≤ y，`【】` 为中文方括号 | 阻塞 |
 | 4 | 标题与 body 之间空行 | 标题之后必须有一个空行再接 body | 阻塞 |
 | 5 | 【原因分析】 | 存在且 8~50 字 | 阻塞 |
@@ -1477,7 +1477,7 @@ python3 -m py_compile \
 
 mkdir -p release
 find release -mindepth 1 -maxdepth 1 -type f -delete
-zip -q release/gerrit-pipeline-v1.9.5.zip \
+zip -q release/gerrit-pipeline-v1.9.6.zip \
   gerrit-pipeline/README.md \
   gerrit-pipeline/SKILL.md \
   gerrit-pipeline/skill.json \
@@ -1487,12 +1487,12 @@ zip -q release/gerrit-pipeline-v1.9.5.zip \
   gerrit-pipeline/scripts/gerrit_post_review.py \
   gerrit-pipeline/scripts/gerrit_post_checklist.py
 
-unzip -l release/gerrit-pipeline-v1.9.5.zip
-sha256sum release/gerrit-pipeline-v1.9.5.zip
+unzip -l release/gerrit-pipeline-v1.9.6.zip
+sha256sum release/gerrit-pipeline-v1.9.6.zip
 
 git status --short
 git add -A
-git commit -m "release: gerrit-pipeline v1.9.5"
+git commit -m "release: gerrit-pipeline v1.9.6"
 git push origin "$(git branch --show-current)"
 ```
 
@@ -1519,11 +1519,11 @@ bash ~/.openclaw/workspace/skills/skillpack-client/scripts/pack-skill.sh \
 # 正式发布：wrapper 会依次执行 telemetry pre、SkillPack lint、publish、telemetry post
 bash ~/.openclaw/workspace/skills/skillpack-client/scripts/publish-with-telemetry.sh \
   gerrit-pipeline \
-  --changelog "gerrit-pipeline v1.9.5"
+  --changelog "gerrit-pipeline v1.9.6"
 
 git status --short
 git add -A
-git commit -m "release: gerrit-pipeline v1.9.5"
+git commit -m "release: gerrit-pipeline v1.9.6"
 git push origin "$(git branch --show-current)"
 ```
 
@@ -1532,6 +1532,12 @@ git push origin "$(git branch --show-current)"
 ---
 
 ## 版本历史
+
+### v1.9.6（2026/6/1）
+
+1. **JIRA-ID 前缀白名单放开**：Gerrit Pipeline 不再枚举固定项目 Key，避免新增项目或新增 Jira 前缀时被提交流程误拦截
+2. **通用 Jira Key 形态校验**：JIRA-ID 校验改为 `【[A-Z][A-Z0-9]*-[0-9]+】`，仅要求项目 Key 以大写字母开头、后接数字编号并使用中文方括号包裹
+3. **兼容性保持**：JIRA-ID 用户确认、真实工单要求、commit message 阻塞校验和修正重试闭环保持不变
 
 ### v1.9.5（2026/5/29）
 
