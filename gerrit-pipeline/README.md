@@ -1,6 +1,6 @@
 # gerrit-pipeline — 使用说明
 
-**版本：v1.9.6**
+**版本：v1.9.7**
 
 gerrit-pipeline 是一个 Claude Code 优先、Agent Neutral 兼容的 Skill，为车联 AutoLink 团队提供 Gerrit 代码提交评审一站式自动化能力。Claude Code 中可获得最佳体验：斜杠命令、结构化确认、多选、Skill 调用都能直接串联；其他 Agent 只要支持读取 skill 文档、执行脚本、与用户确认/选择，也可以按同一流程执行。v1.9.0 起，原 Step 3（Checklist 确认）与原 Step 3.5（飞书通知前确认）合并为单一确认屏，在不降低安全红线的前提下减少交互弹窗。目标是减少重复操作、统一提交规范、加速 Code Review 闭环。
 
@@ -263,7 +263,7 @@ python3 pipeline_config.py remove-project --name "D01"
 
 ## 8. 版本下载
 
-最新版本及历史版本下载：[gerrit-pipeline-v1.9.6.zip](https://t83dfrspj4.feishu.cn/wiki/Urrkw0A72if06ykzcmFcSdsrnag)
+最新版本及历史版本下载：[gerrit-pipeline-v1.9.7.zip](https://t83dfrspj4.feishu.cn/wiki/Urrkw0A72if06ykzcmFcSdsrnag)
 
 ### 8.1 本地打包发版流程
 
@@ -276,6 +276,7 @@ python3 pipeline_config.py remove-project --name "D01"
 
 | 版本 | 日期 | 变更摘要 |
 |------|------|---------|
+| v1.9.7 | 2026-06-03 | 1. 补齐飞书 zip 发布包中的 `references/full-spec.md`，避免安装后 `SKILL.md` 指向的完整规范缺失<br>2. 流程 A 增加 zip 内容校验，流程 B 增加 SkillPack tarball 内容校验，避免后续发版再次遗漏完整规范<br>3. 不改变用户配置、主流程行为和既有升级路径 |
 | v1.9.6 | 2026-06-01 | 1. 放开 Gerrit Pipeline JIRA-ID 前缀白名单，不再枚举固定项目 Key<br>2. JIRA-ID 校验改为通用 Jira Key 形态：项目 Key 以大写字母开头，可包含大写字母和数字，后接 `-` 与数字编号<br>3. 保留 JIRA-ID 用户确认、中文方括号包裹和真实工单要求，提升新增项目兼容性 |
 | v1.9.5 | 2026-05-29 | 1. AutoLink Code Review Checklist 升级为 `v2.1`，固定模板从 12 项扩展为 13 项<br>2. 流程合规新增“代码影响”检查项，要求共享代码、公共模块、平台化组件变更说明影响项目和验证范围<br>3. 同步更新 Step 3 Checklist 展示、贴回和评审结论区分说明 |
 | v1.9.4 | 2026-05-25 | 1. 将 SkillPack 发布平台切换为 `claude-code`，重新发布 Claude Code 通道版本<br>2. 保留 `her`、`cursor`、`codex` 和通用 `agent` 兼容性说明，避免误将兼容范围写入 SkillPack 单平台字段 |

@@ -1477,22 +1477,24 @@ python3 -m py_compile \
 
 mkdir -p release
 find release -mindepth 1 -maxdepth 1 -type f -delete
-zip -q release/gerrit-pipeline-v1.9.6.zip \
+zip -q release/gerrit-pipeline-v1.9.7.zip \
   gerrit-pipeline/README.md \
   gerrit-pipeline/SKILL.md \
   gerrit-pipeline/skill.json \
   gerrit-pipeline/.skillpackignore \
+  gerrit-pipeline/references/full-spec.md \
   gerrit-pipeline/scripts/pipeline_config.py \
   gerrit-pipeline/scripts/feishu_notify.py \
   gerrit-pipeline/scripts/gerrit_post_review.py \
   gerrit-pipeline/scripts/gerrit_post_checklist.py
 
-unzip -l release/gerrit-pipeline-v1.9.6.zip
-sha256sum release/gerrit-pipeline-v1.9.6.zip
+unzip -l release/gerrit-pipeline-v1.9.7.zip
+unzip -l release/gerrit-pipeline-v1.9.7.zip | grep -F "gerrit-pipeline/references/full-spec.md"
+sha256sum release/gerrit-pipeline-v1.9.7.zip
 
 git status --short
 git add -A
-git commit -m "release: gerrit-pipeline v1.9.6"
+git commit -m "release: gerrit-pipeline v1.9.7"
 git push origin "$(git branch --show-current)"
 ```
 
@@ -1500,7 +1502,7 @@ git push origin "$(git branch --show-current)"
 
 ### 流程 B：SkillPack 发布
 
-SkillPack 发布使用 `skill.json` 作为版本与元数据 SOT。当前发布的 `platform` 为 `claude-code`；Her、Cursor、Codex 和通用 agent 兼容性写入 `description` 与 `tags`，后续如需对应端上架需从对应客户端单独发布。发布包必须由 SkillPack 客户端生成 tar.gz，包根目录直接包含 `SKILL.md`、`skill.json`、`README.md` 和 `scripts/`，不得带 `gerrit-pipeline/` 目录前缀。
+SkillPack 发布使用 `skill.json` 作为版本与元数据 SOT。当前发布的 `platform` 为 `claude-code`；Her、Cursor、Codex 和通用 agent 兼容性写入 `description` 与 `tags`，后续如需对应端上架需从对应客户端单独发布。发布包必须由 SkillPack 客户端生成 tar.gz，包根目录直接包含 `SKILL.md`、`skill.json`、`README.md`、`scripts/` 和 `references/`，不得带 `gerrit-pipeline/` 目录前缀。
 
 ```bash
 python3 -m py_compile \
@@ -1512,18 +1514,21 @@ python3 -m py_compile \
 export SKILLPACK_SKILLS_ROOT="$(pwd)"
 
 # 预检打包结构：tarball 根目录必须直接包含 SKILL.md 与 skill.json
-bash ~/.openclaw/workspace/skills/skillpack-client/scripts/pack-skill.sh \
+TARBALL="$(bash ~/.openclaw/workspace/skills/skillpack-client/scripts/pack-skill.sh \
   gerrit-pipeline \
-  --skills-root "$SKILLPACK_SKILLS_ROOT"
+  --skills-root "$SKILLPACK_SKILLS_ROOT" | tail -n 1)"
+
+# 发布包必须包含完整规范
+tar -tzf "$TARBALL" | grep -F "references/full-spec.md"
 
 # 正式发布：wrapper 会依次执行 telemetry pre、SkillPack lint、publish、telemetry post
 bash ~/.openclaw/workspace/skills/skillpack-client/scripts/publish-with-telemetry.sh \
   gerrit-pipeline \
-  --changelog "gerrit-pipeline v1.9.6"
+  --changelog "gerrit-pipeline v1.9.7"
 
 git status --short
 git add -A
-git commit -m "release: gerrit-pipeline v1.9.6"
+git commit -m "release: gerrit-pipeline v1.9.7"
 git push origin "$(git branch --show-current)"
 ```
 
@@ -1532,6 +1537,12 @@ git push origin "$(git branch --show-current)"
 ---
 
 ## 版本历史
+
+### v1.9.7（2026/6/3）
+
+1. **发布包补齐完整规范**：飞书 zip 手动分发清单补充 `gerrit-pipeline/references/full-spec.md`，避免安装后 `SKILL.md` 指向的完整规范缺失
+2. **发布预检补强**：流程 A 增加 zip 内容校验，流程 B 增加 SkillPack tarball 内容校验，确保后续发版不会再次遗漏完整规范
+3. **兼容性保持**：不改变 pipeline 行为、用户配置、脚本入口和既有版本升级路径
 
 ### v1.9.6（2026/6/1）
 
