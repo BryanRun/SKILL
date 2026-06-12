@@ -1,7 +1,7 @@
 {
   "name": "gerrit-pipeline",
-  "version": "1.9.7",
-  "description": "Gerrit Pipeline 是面向 AutoLink Gerrit 代码提交流程的一键评审流水线 skill，串联代码提交、自动代码评审、Checklist 贴回和飞书通知，支持新建提交、amend、cherry-pick、多仓 topic 关联提交、项目差异化配置和 Agent Neutral 运行方式。适用于 Her、Cursor、Claude Code、Codex 及其他具备 shell/Python 执行能力的 agent，用于统一 commit message、Code Review、Checklist 与飞书通知闭环。",
+  "version": "2.0.0",
+  "description": "Gerrit Pipeline 是面向 AutoLink Gerrit 代码提交流程的一键评审流水线 skill，串联代码提交、自动代码评审、Checklist 贴回和飞书通知，支持新建提交、amend、cherry-pick、多仓 topic 关联提交、项目差异化配置、执行遥测和 Agent Neutral 运行方式。适用于 Her、Cursor、Claude Code、Codex 及其他具备 shell/Python 执行能力的 agent，用于统一 commit message、Code Review、Checklist 与飞书通知闭环。",
   "author": "Hualei",
   "maintainer": "Hualei",
   "platform": [
@@ -16,6 +16,7 @@
     "multi-repo",
     "topic",
     "commit-message",
+    "telemetry",
     "codex",
     "agent-neutral",
     "cursor",
@@ -74,6 +75,7 @@
     }
   ],
   "changelog": [
+    "v2.0.0: 默认启用内部运行指标上报，新增本地 spool 队列、后台批量补发、Telemetry Gateway 异步入库和 Feishu Bitable 幂等写入，用户无需额外配置。",
     "v1.9.7: 修复发布清单遗漏 references/full-spec.md，飞书 zip 与 SkillPack tarball 均增加完整规范文件校验，保持用户配置和主流程行为不变。",
     "v1.9.6: 放开 Gerrit Pipeline JIRA-ID 前缀白名单，改为通用 Jira Key 形态校验，提升新增项目兼容性。",
     "v1.9.5: 升级 AutoLink Code Review Checklist 到 v2.1，新增代码影响检查项，并同步 13 项 Checklist 展示、贴回和文档说明。",

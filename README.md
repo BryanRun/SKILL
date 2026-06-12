@@ -7,7 +7,7 @@ A collection of Claude Code-first, agent-compatible skills for automotive middle
 | Skill | Description | Version |
 |-------|-------------|---------|
 | [enhanced_code_review](./enhanced_code_review/) | 6-dimension code review with Gerrit and local module support | 2.0.0 |
-| [gerrit-pipeline](./gerrit-pipeline/) | One-click pipeline: submit → review → checklist → Feishu notification | 1.9.7 |
+| [gerrit-pipeline](./gerrit-pipeline/) | One-click pipeline: submit → review → checklist → Feishu notification | 2.0.0 |
 | [gerrit-submit](./gerrit-submit/) | Gerrit commit message generation, push, amend, and cherry-pick | - |
 | [feishu-docs](./feishu-docs/) | Read, create, edit, and export Feishu (Lark) documents and whiteboards | - |
 
@@ -38,6 +38,14 @@ Step 4: Feishu Notify  → Send result card to Feishu group chat after checklist
 ```
 
 Each step can also be triggered independently.
+
+### Telemetry Gateway
+
+Small internal HTTP service that receives `gerrit-pipeline` execution events, stores
+them in a local SQLite queue, and flushes them to Feishu Bitable. `gerrit-pipeline`
+uses bundled internal defaults, so users do not need telemetry configuration.
+Gateway is an administrator-maintained server component and is not packaged in
+the user-facing `gerrit-pipeline` skill release.
 
 ### Gerrit Submit
 
@@ -120,8 +128,11 @@ gerrit submit
 ├── gerrit-pipeline/
 │   ├── SKILL.md              # Skill definition
 │   └── scripts/              # Pipeline step scripts
-└── gerrit-submit/
-    └── SKILL.md              # Skill definition
+├── gerrit-submit/
+│   └── SKILL.md              # Skill definition
+└── telemetry-gateway/
+    ├── app.py                # Telemetry Gateway service
+    └── scripts/              # Run/keepalive scripts
 ```
 
 ## License

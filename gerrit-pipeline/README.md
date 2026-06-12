@@ -1,6 +1,6 @@
 # gerrit-pipeline — 使用说明
 
-**版本：v1.9.7**
+**版本：v2.0.0**
 
 gerrit-pipeline 是一个 Claude Code 优先、Agent Neutral 兼容的 Skill，为车联 AutoLink 团队提供 Gerrit 代码提交评审一站式自动化能力。Claude Code 中可获得最佳体验：斜杠命令、结构化确认、多选、Skill 调用都能直接串联；其他 Agent 只要支持读取 skill 文档、执行脚本、与用户确认/选择，也可以按同一流程执行。v1.9.0 起，原 Step 3（Checklist 确认）与原 Step 3.5（飞书通知前确认）合并为单一确认屏，在不降低安全红线的前提下减少交互弹窗。目标是减少重复操作、统一提交规范、加速 Code Review 闭环。
 
@@ -230,6 +230,7 @@ python3 pipeline_config.py list-projects
 
 # 删除项目配置
 python3 pipeline_config.py remove-project --name "D01"
+
 ```
 
 ## 5. 脚本说明
@@ -239,8 +240,17 @@ python3 pipeline_config.py remove-project --name "D01"
 | `pipeline_config.py` | 配置管理（init / show / lookup-users / add-project / list-projects / remove-project） |
 | `feishu_notify.py` | 发送飞书群通知（读取配置，支持 @mention） |
 | `gerrit_post_checklist.py` | 贴 Checklist 到 Gerrit CR 评论 |
+| `gerrit_post_review.py` | 贴评审结论到 Gerrit CR 评论 |
+| `telemetry_client.py` | 内部运行指标后台上报 |
+| `telemetry_defaults.json` | 内置运行指标默认配置 |
 
-## 6. 依赖
+## 6. 内部运行指标
+
+v2.0.0 起，gerrit-pipeline 默认启用内部运行指标上报。配置随 skill 内部分发，用户无需感知或配置 URL、版本 key、签名密钥、开关等参数。
+
+上报在后台执行，请求使用 HMAC-SHA256、时间戳和 nonce 签名，不影响代码提交、评审、Checklist 或飞书通知主流程。网络不可达时，事件会暂存在本地队列，并在后续 pipeline 运行且网络可用时补发。
+
+## 7. 依赖
 
 1. Python 3.6+
 2. `requests` 库（`pip install requests`）
@@ -249,7 +259,7 @@ python3 pipeline_config.py remove-project --name "D01"
 
 > Step 1（代码提交）、Step 3（Checklist）、Step 4（飞书通知）为内置能力，无额外 skill 依赖。
 
-## 7. 常见问题
+## 8. 常见问题
 
 **Q1: 飞书通知发送失败？**
 1. 确认 **WALL-E** 机器人已加入目标群
@@ -261,22 +271,23 @@ python3 pipeline_config.py remove-project --name "D01"
 **Q3: 如何更换通知群？**
 1. 运行 `python3 pipeline_config.py init` 重新配置 chat_id
 
-## 8. 版本下载
+## 9. 版本下载
 
-最新版本及历史版本下载：[gerrit-pipeline-v1.9.7.zip](https://t83dfrspj4.feishu.cn/wiki/Urrkw0A72if06ykzcmFcSdsrnag)
+线上版本及历史版本下载：[gerrit-pipeline 版本下载](https://t83dfrspj4.feishu.cn/wiki/Ja9BwNfKfi4ajAkwzSrcEFdznne)
 
-### 8.1 本地打包发版流程
+### 9.1 本地打包发版流程
 
 对应飞书使用手册：https://t83dfrspj4.feishu.cn/wiki/Tzq1wRg5biiaCLkcx2gcgcb6nO1
 
 流程 A 用于飞书 zip 手动分发：本地清空 `release/` 后生成当前版本 zip，不通过飞书 API 上传，文件由维护者手动替换。
 流程 B 用于 SkillPack 发布：以 `skill.json` 为版本与元数据 SOT，通过 SkillPack 客户端完成 lint、打包与发布，当前 SkillPack 发布通道为 `claude-code`；`her`、`cursor`、`codex` 和通用 `agent` 兼容性写入描述与标签，后续如需对应端上架需从对应客户端单独发布。
 
-## 9. 版本历史
+## 10. 版本历史
 
 | 版本 | 日期 | 变更摘要 |
 |------|------|---------|
-| v1.9.7 | 2026-06-03 | 1. 补齐飞书 zip 发布包中的 `references/full-spec.md`，避免安装后 `SKILL.md` 指向的完整规范缺失<br>2. 流程 A 增加 zip 内容校验，流程 B 增加 SkillPack tarball 内容校验，避免后续发版再次遗漏完整规范<br>3. 不改变用户配置、主流程行为和既有升级路径 |
+| v2.0.0 | 2026-06-12 | 1. 默认启用内部运行指标上报，配置随 skill 分发，用户无需额外配置<br>2. 新增本地 spool 队列，网络不可达或后台进程拉起失败时保留事件，下次运行批量补发<br>3. 新增 Telemetry Gateway，接收端先异步入库再由后台 flush 到飞书多维表格，并按 `event_id` 做幂等保护 |
+| v1.9.7 | 2026-06-03 | 1. 补齐发布包中的 `references/full-spec.md`，避免用户更新后完整规范文档缺失<br>2. 流程 A 增加 zip 内容校验，流程 B 增加 SkillPack tarball 内容校验，避免后续发版再次遗漏完整规范<br>3. 不改变用户配置、主流程行为和既有升级路径 |
 | v1.9.6 | 2026-06-01 | 1. 放开 Gerrit Pipeline JIRA-ID 前缀白名单，不再枚举固定项目 Key<br>2. JIRA-ID 校验改为通用 Jira Key 形态：项目 Key 以大写字母开头，可包含大写字母和数字，后接 `-` 与数字编号<br>3. 保留 JIRA-ID 用户确认、中文方括号包裹和真实工单要求，提升新增项目兼容性 |
 | v1.9.5 | 2026-05-29 | 1. AutoLink Code Review Checklist 升级为 `v2.1`，固定模板从 12 项扩展为 13 项<br>2. 流程合规新增“代码影响”检查项，要求共享代码、公共模块、平台化组件变更说明影响项目和验证范围<br>3. 同步更新 Step 3 Checklist 展示、贴回和评审结论区分说明 |
 | v1.9.4 | 2026-05-25 | 1. 将 SkillPack 发布平台切换为 `claude-code`，重新发布 Claude Code 通道版本<br>2. 保留 `her`、`cursor`、`codex` 和通用 `agent` 兼容性说明，避免误将兼容范围写入 SkillPack 单平台字段 |
@@ -303,7 +314,7 @@ python3 pipeline_config.py remove-project --name "D01"
 | v1.1.0 | 2026-04-26 | 1. 融合 gerrit-submit 为内置能力，Step 1 不再依赖外部 skill<br>2. 通知卡片新增提交人字段并 @mention<br>3. 新增 `feishu.submitter` 配置项 |
 | v1.0.0 | 2026-04-25 | 1. 首次发布<br>2. 四步流水线（代码提交 → 评审 → Checklist → 飞书通知）<br>3. 每步支持独立操作<br>4. 配置化（用户私有 config.json）<br>5. 飞书通知 @mention 审核人 |
 
-## 10. 反馈与建议
+## 11. 反馈与建议
 
 使用中如有问题、建议或新需求，欢迎在反馈表中填写：
 

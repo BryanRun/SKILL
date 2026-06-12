@@ -162,6 +162,8 @@ python3 scripts/feishu_notify.py \
 - `scripts/gerrit_post_review.py`：评审结论贴回
 - `scripts/gerrit_post_checklist.py`：Checklist 贴回
 - `scripts/feishu_notify.py`：飞书通知卡片
+- `scripts/telemetry_client.py`：非阻塞执行遥测上报
+- `scripts/telemetry_defaults.json`：内部 telemetry 默认配置
 
 ## 发版流程
 
@@ -174,15 +176,25 @@ python3 scripts/feishu_notify.py \
 
 
 
-## 执行遥测（SkillPack 2026-04-30 起强制）
+## 执行遥测
 
-**脚本式 skill（有入口脚本）**：脚本开头添加 2 行 trap 模板：
+Telemetry 默认启用，固定上报到内网 Telemetry Gateway，版本 key 和 HMAC 签名密钥随 skill 内部分发，请求带时间戳与 nonce 防重放。完整流水线执行开始时记录开始时间；最终报告输出前先后台触发
+`scripts/telemetry_client.py` 发送一次 `pipeline_done` 事件，然后立即输出最终报告。Telemetry 发送失败不得影响主流程结论；失败事件会暂存在本地队列，下次 pipeline 启动且网络可用时批量补发。
+
 ```bash
-_T_START=$(date +%s%3N); _T_SKILL="gerrit-pipeline"
-trap '_T_RC=$?; bash ~/.openclaw/workspace/skills/skillpack-client/scripts/record-run.sh "$_T_SKILL" $(($(date +%s%3N) - _T_START)) $([ $_T_RC -eq 0 ] && echo true || echo false) &' EXIT
+_GP_START=$(date +%s%3N)
+
+python3 scripts/telemetry_client.py \
+  --background \
+  --event-type pipeline_done \
+  --mode submit \
+  --success true \
+  --duration-ms "$(($(date +%s%3N) - _GP_START))" \
+  --repo-count 1
 ```
 
-**流程式 skill（纯 SKILL.md）**：在 SKILL.md 流程末尾手动调：
-```bash
-bash ~/.openclaw/workspace/skills/skillpack-client/scripts/record-run.sh "gerrit-pipeline" <duration-ms> <success>
-```
+失败场景将 `--success false`，并传入稳定的 `--error-code`，如
+`step1_submit_failed`、`step3_checklist_failed` 或 `step4_notify_failed`；
+同时传入 `--failure-stage`，如 `submit`、`review`、`checklist` 或 `notify`。
+独立操作可将 `--mode` 设置为 `submit`、`amend`、`cherry-pick`、
+`review`、`checklist` 或 `notify`。

@@ -1181,6 +1181,7 @@ python3 pipeline_config.py list-projects
 
 # 删除项目配置
 python3 pipeline_config.py remove-project --name "D01"
+
 ```
 
 配置 `projects` 后，Pipeline 在 Step 1 中会通过 `AskUserQuestion` 或等价交互能力让用户选择本次提交所属项目，匹配的项目配置自动覆盖顶层默认值。未配置 `projects` 时使用顶层默认配置，行为与单项目场景完全一致。
@@ -1403,6 +1404,84 @@ python3 pipeline_config.py remove-project --name "D01"
 
 ---
 
+## 执行遥测
+
+Telemetry 默认启用，固定上报到内网 Telemetry Gateway，版本 key 和 HMAC 签名密钥随 skill 内部
+`scripts/telemetry_defaults.json` 分发，用户侧不需要也不展示 telemetry 配置。完整流水线开始时记录开始时间；最终报告输出前，执行 Agent 先调用
+`scripts/telemetry_client.py` 后台发送一次 `pipeline_done` 事件，然后立即输出最终报告。网关不可达、后台进程拉起失败或发送失败时，不得影响主流程状态和用户报告。
+
+### 配置
+
+Telemetry 默认配置保存在 skill 内部 `scripts/telemetry_defaults.json`。管理员按版本轮换 `key_id` 与 HMAC secret 时，更新该文件并重新发布 skill；用户更新 skill 后自动使用新默认值。
+
+环境变量覆盖项：
+
+| 环境变量 | 说明 |
+|----------|------|
+| `GERRIT_PIPELINE_TELEMETRY_ENABLED` | `true` / `false` |
+| `GERRIT_PIPELINE_TELEMETRY_URL` | Telemetry Gateway 地址 |
+| `GERRIT_PIPELINE_TELEMETRY_KEY_ID` | 版本化签名 key id |
+| `GERRIT_PIPELINE_TELEMETRY_HMAC_SECRET` | HMAC-SHA256 签名密钥 |
+| `GERRIT_PIPELINE_TELEMETRY_TOKEN` | 旧版兼容 fallback，等价于 HMAC secret |
+| `GERRIT_PIPELINE_TELEMETRY_TIMEOUT_SECONDS` | 发送超时 |
+| `GERRIT_PIPELINE_TELEMETRY_INSTALL_ID` | 固定安装标识 |
+| `GERRIT_PIPELINE_AGENT` | Agent 名称，如 `codex` / `claude-code` |
+
+客户端发送事件时不再使用裸 bearer token。每次请求都会对 HTTP method、路径、UTC 时间戳、nonce 和 body SHA-256 做 HMAC-SHA256 签名，并通过 `X-GP-Key-Id`、`X-GP-Timestamp`、`X-GP-Nonce`、`X-GP-Body-SHA256` 与 `X-GP-Signature` 请求头提交给 Gateway。Gateway 按 `key_id` 查找密钥，校验时间窗口和 nonce 幂等，重复 nonce 或被吊销的 `key_id` 会被拒绝。
+
+### 调用规范
+
+完整流水线必须在最终报告输出前后台触发 telemetry，然后立即输出最终报告，避免用户体感等待 telemetry，也避免 final response 后无法再执行工具调用。
+
+```bash
+_GP_START=$(date +%s%3N)
+
+python3 <skill_dir>/scripts/telemetry_client.py \
+  --background \
+  --event-type pipeline_done \
+  --mode submit \
+  --success true \
+  --duration-ms "$(($(date +%s%3N) - _GP_START))" \
+  --repo-count 1
+```
+
+失败场景必须传入 `--success false` 和稳定的 `--error-code`，例如：
+`step1_submit_failed`、`step2_review_failed`、`step3_checklist_failed`、
+`step4_notify_failed`；同时建议传入 `--failure-stage`，如 `submit`、
+`review`、`checklist` 或 `notify`。独立操作使用对应 `--mode`：
+`submit`、`amend`、`cherry-pick`、`review`、`checklist` 或 `notify`。
+
+### 本地队列
+
+当网关不可达、超时或返回非 2xx 时，当前事件写入本地队列：
+
+```text
+~/.cache/gerrit-pipeline/telemetry-queue/
+```
+
+下一次 pipeline 结束触发 telemetry 时，客户端会先按时间顺序批量 flush 队列中的旧事件，再发送当前事件。旧事件发送成功后删除；遇到网络失败则停止 flush，保留剩余队列。永久无效事件移入 dead-letter 队列，避免每次阻塞补发。队列最多保留 200 条、最长保留 14 天，超出部分自动清理。
+
+```text
+~/.cache/gerrit-pipeline/telemetry-dead-letter/
+```
+
+后台进程拉起失败时，客户端必须直接将当前事件写入本地队列，保证触发过的事件不会因为后台进程失败而丢失。
+
+### 事件字段
+
+| 字段 | 说明 |
+|------|------|
+| `schema_version` | 当前固定为 `1.0` |
+| `skill` / `skill_version` | 固定为 `gerrit-pipeline` 与 README 版本 |
+| `event_type` | 默认 `pipeline_done` |
+| `mode` | 本次执行模式 |
+| `success` / `error_code` / `failure_stage` | 执行结果、失败分类与失败阶段 |
+| `duration_ms` / `repo_count` | 耗时与涉及仓库数量 |
+| `submitter_name` / `agent` / `install_id` | 提交人、运行时和安装标识 |
+| `gateway_key_id` | Gateway 验签后派生的版本 key id，不由客户端发送 |
+
+---
+
 ## 流水线完成报告
 
 四步全部完成后，向用户输出简报。
@@ -1473,11 +1552,12 @@ python3 -m py_compile \
   gerrit-pipeline/scripts/feishu_notify.py \
   gerrit-pipeline/scripts/gerrit_post_checklist.py \
   gerrit-pipeline/scripts/gerrit_post_review.py \
-  gerrit-pipeline/scripts/pipeline_config.py
+  gerrit-pipeline/scripts/pipeline_config.py \
+  gerrit-pipeline/scripts/telemetry_client.py
 
 mkdir -p release
 find release -mindepth 1 -maxdepth 1 -type f -delete
-zip -q release/gerrit-pipeline-v1.9.7.zip \
+zip -q release/gerrit-pipeline-v2.0.0.zip \
   gerrit-pipeline/README.md \
   gerrit-pipeline/SKILL.md \
   gerrit-pipeline/skill.json \
@@ -1486,15 +1566,19 @@ zip -q release/gerrit-pipeline-v1.9.7.zip \
   gerrit-pipeline/scripts/pipeline_config.py \
   gerrit-pipeline/scripts/feishu_notify.py \
   gerrit-pipeline/scripts/gerrit_post_review.py \
-  gerrit-pipeline/scripts/gerrit_post_checklist.py
+  gerrit-pipeline/scripts/gerrit_post_checklist.py \
+  gerrit-pipeline/scripts/telemetry_client.py \
+  gerrit-pipeline/scripts/telemetry_defaults.json
 
-unzip -l release/gerrit-pipeline-v1.9.7.zip
-unzip -l release/gerrit-pipeline-v1.9.7.zip | grep -F "gerrit-pipeline/references/full-spec.md"
-sha256sum release/gerrit-pipeline-v1.9.7.zip
+unzip -l release/gerrit-pipeline-v2.0.0.zip
+unzip -l release/gerrit-pipeline-v2.0.0.zip | grep -F "gerrit-pipeline/references/full-spec.md"
+unzip -l release/gerrit-pipeline-v2.0.0.zip | grep -F "gerrit-pipeline/scripts/telemetry_client.py"
+unzip -l release/gerrit-pipeline-v2.0.0.zip | grep -F "gerrit-pipeline/scripts/telemetry_defaults.json"
+sha256sum release/gerrit-pipeline-v2.0.0.zip
 
 git status --short
 git add -A
-git commit -m "release: gerrit-pipeline v1.9.7"
+git commit -m "release: gerrit-pipeline v2.0.0"
 git push origin "$(git branch --show-current)"
 ```
 
@@ -1509,7 +1593,8 @@ python3 -m py_compile \
   gerrit-pipeline/scripts/feishu_notify.py \
   gerrit-pipeline/scripts/gerrit_post_checklist.py \
   gerrit-pipeline/scripts/gerrit_post_review.py \
-  gerrit-pipeline/scripts/pipeline_config.py
+  gerrit-pipeline/scripts/pipeline_config.py \
+  gerrit-pipeline/scripts/telemetry_client.py
 
 export SKILLPACK_SKILLS_ROOT="$(pwd)"
 
@@ -1520,15 +1605,17 @@ TARBALL="$(bash ~/.openclaw/workspace/skills/skillpack-client/scripts/pack-skill
 
 # 发布包必须包含完整规范
 tar -tzf "$TARBALL" | grep -F "references/full-spec.md"
+tar -tzf "$TARBALL" | grep -F "scripts/telemetry_client.py"
+tar -tzf "$TARBALL" | grep -F "scripts/telemetry_defaults.json"
 
 # 正式发布：wrapper 会依次执行 telemetry pre、SkillPack lint、publish、telemetry post
 bash ~/.openclaw/workspace/skills/skillpack-client/scripts/publish-with-telemetry.sh \
   gerrit-pipeline \
-  --changelog "gerrit-pipeline v1.9.7"
+  --changelog "gerrit-pipeline v2.0.0"
 
 git status --short
 git add -A
-git commit -m "release: gerrit-pipeline v1.9.7"
+git commit -m "release: gerrit-pipeline v2.0.0"
 git push origin "$(git branch --show-current)"
 ```
 
@@ -1537,6 +1624,13 @@ git push origin "$(git branch --show-current)"
 ---
 
 ## 版本历史
+
+### v2.0.0（2026/6/12）
+
+1. **内部运行指标默认启用**：新增 `scripts/telemetry_client.py` 与 `scripts/telemetry_defaults.json`，URL、版本 key、HMAC secret、enabled 和 timeout 随 skill 内部分发，用户无需配置
+2. **轻量本地 spool**：网络不可达、发送失败或后台进程拉起失败时，本地保留事件；下一次运行先批量补发旧事件，再发送当前事件
+3. **Gateway 异步入库**：Telemetry Gateway 接收请求后补充 `gateway_key_id` 并写入 SQLite，然后立即返回；飞书多维表格写入由后台线程或手动 flush 执行，避免反向拖慢客户端
+4. **幂等与坏事件隔离**：Gateway 按 `event_id` 查询/复用飞书记录，客户端将永久无效事件移入 dead-letter，避免重复写入和反复阻塞
 
 ### v1.9.7（2026/6/3）
 
@@ -1695,15 +1789,8 @@ git push origin "$(git branch --show-current)"
 
 
 
-## 执行遥测（SkillPack 2026-04-30 起强制）
+## 执行遥测（当前规范）
 
-**脚本式 skill（有入口脚本）**：脚本开头添加 2 行 trap 模板：
-```bash
-_T_START=$(date +%s%3N); _T_SKILL="gerrit-pipeline"
-trap '_T_RC=$?; bash ~/.openclaw/workspace/skills/skillpack-client/scripts/record-run.sh "$_T_SKILL" $(($(date +%s%3N) - _T_START)) $([ $_T_RC -eq 0 ] && echo true || echo false) &' EXIT
-```
-
-**流程式 skill（纯 SKILL.md）**：在 SKILL.md 流程末尾手动调：
-```bash
-bash ~/.openclaw/workspace/skills/skillpack-client/scripts/record-run.sh "gerrit-pipeline" <duration-ms> <success>
-```
+使用 `scripts/telemetry_client.py` 发送 `pipeline_done` 事件，详见上文
+“执行遥测”章节。旧的 SkillPack `record-run.sh` 模板不再作为
+gerrit-pipeline 的主遥测路径。

@@ -1,0 +1,14 @@
+[Unit]
+Description=Telemetry Gateway
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/telemetry-gateway
+ExecStart=/usr/bin/python3 /path/to/telemetry-gateway/app.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
