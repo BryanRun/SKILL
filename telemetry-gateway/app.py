@@ -31,11 +31,36 @@ DEFAULT_DB_PATH = BASE_DIR / "data" / "telemetry.sqlite3"
 FEISHU_BASE_URL = "https://open.feishu.cn/open-apis"
 
 DATE_KEYS = {"received_at", "client_time"}
-NUMBER_KEYS = {"duration_ms", "repo_count"}
-BOOL_KEYS = {"success"}
+NUMBER_KEYS = {
+    "duration_s",
+    "repo_count",
+    "submit_duration_s",
+    "review_duration_s",
+    "checklist_duration_s",
+    "notify_duration_s",
+}
+LEGACY_NUMBER_KEYS = {
+    "duration_ms",
+    "submit_duration_ms",
+    "review_duration_ms",
+    "checklist_duration_ms",
+    "notify_duration_ms",
+}
+BOOL_KEYS = {"success", "is_full_pipeline"}
 FEISHU_FIELD_TYPE_NUMBER = 2
 FEISHU_FIELD_TYPE_SINGLE_SELECT = 3
 FEISHU_FIELD_TYPE_DATE = 5
+LEGACY_DURATION_TO_SECONDS = {
+    "duration_ms": "duration_s",
+    "submit_duration_ms": "submit_duration_s",
+    "review_duration_ms": "review_duration_s",
+    "checklist_duration_ms": "checklist_duration_s",
+    "notify_duration_ms": "notify_duration_s",
+}
+SECONDS_TO_LEGACY_DURATION = {
+    value: key
+    for key, value in LEGACY_DURATION_TO_SECONDS.items()
+}
 
 DEFAULT_FIELD_MAP = {
     "event_id": "event_id",
@@ -46,14 +71,24 @@ DEFAULT_FIELD_MAP = {
     "skill_version": "skill_version",
     "event_type": "event_type",
     "mode": "mode",
+    "entry_mode": "entry_mode",
+    "steps": "steps",
+    "is_full_pipeline": "is_full_pipeline",
     "success": "success",
-    "duration_ms": "duration_ms",
+    "duration_s": "duration_s",
+    "submit_duration_s": "submit_duration_s",
+    "review_duration_s": "review_duration_s",
+    "checklist_duration_s": "checklist_duration_s",
+    "notify_duration_s": "notify_duration_s",
+    "step_trace": "step_trace",
     "submitter_name": "submitter_name",
     "agent": "agent",
+    "agent_source": "agent_source",
     "repo_count": "repo_count",
     "error_code": "error_code",
     "failure_stage": "failure_stage",
     "install_id": "install_id",
+    "run_id": "run_id",
     "gateway_key_id": "gateway_key_id",
     "raw_payload": "raw_payload",
 }
@@ -126,6 +161,34 @@ def parse_date_to_ms(value: Any) -> Any:
         return text
 
 
+def parse_number(value: Any) -> Optional[float]:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number or number in (float("inf"), float("-inf")):
+        return None
+    return number
+
+
+def ms_to_seconds(value: Any) -> Optional[float]:
+    number = parse_number(value)
+    if number is None:
+        return None
+    return round(max(number, 0.0) / 1000, 1)
+
+
+def normalize_number(value: Any) -> Optional[Any]:
+    number = parse_number(value)
+    if number is None:
+        return None
+    if number.is_integer():
+        return int(number)
+    return round(number, 3)
+
+
 def parse_json_env(key: str, default: Any) -> Any:
     value = os.environ.get(key)
     if not value:
@@ -167,7 +230,7 @@ def parse_hmac_keys() -> Dict[str, str]:
         for key, value in keys.items()
         if key and value
     }
-    key_id = os.environ.get("TELEMETRY_HMAC_KEY_ID", "gerrit-pipeline-v2.0.0")
+    key_id = os.environ.get("TELEMETRY_HMAC_KEY_ID", "gerrit-pipeline-v2.0.1")
     secret = os.environ.get("TELEMETRY_HMAC_SECRET", "")
     if key_id and secret:
         parsed.setdefault(key_id, secret)
@@ -297,14 +360,10 @@ def normalize_bitable_value(source_key: str, value: Any, field_type: Optional[in
         return None
     if field_type == FEISHU_FIELD_TYPE_DATE or source_key in DATE_KEYS:
         return parse_date_to_ms(value)
+    if source_key in LEGACY_DURATION_TO_SECONDS:
+        return ms_to_seconds(value)
     if field_type == FEISHU_FIELD_TYPE_NUMBER or source_key in NUMBER_KEYS:
-        try:
-            number = int(value)
-        except (TypeError, ValueError):
-            return None
-        if source_key == "duration_ms" and Config.field_map.get(source_key) == "duration_s":
-            return round(number / 1000, 3)
-        return number
+        return normalize_number(value)
     if field_type == FEISHU_FIELD_TYPE_SINGLE_SELECT:
         if isinstance(value, bool):
             return "true" if value else "false"
@@ -312,6 +371,15 @@ def normalize_bitable_value(source_key: str, value: Any, field_type: Optional[in
     if source_key in BOOL_KEYS:
         return bool(value)
     return str(value)
+
+
+def event_value_for_field(source_key: str, event: Dict[str, Any]) -> Any:
+    value = event.get(source_key)
+    if value is None and source_key in SECONDS_TO_LEGACY_DURATION:
+        legacy_value = event.get(SECONDS_TO_LEGACY_DURATION[source_key])
+        if legacy_value is not None:
+            return ms_to_seconds(legacy_value)
+    return value
 
 
 def event_to_bitable_fields(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -323,7 +391,7 @@ def event_to_bitable_fields(event: Dict[str, Any]) -> Dict[str, Any]:
         if source_key == "raw_payload":
             value = json.dumps(event, ensure_ascii=False, sort_keys=True)
         else:
-            value = event.get(source_key)
+            value = event_value_for_field(source_key, event)
         if value is None:
             continue
         value = normalize_bitable_value(source_key, value, field_types.get(field_name))
@@ -592,11 +660,17 @@ def validate_event(event: Dict[str, Any]) -> Optional[str]:
         return f"skill not allowed: {skill}"
     if "success" in event and not isinstance(event["success"], bool):
         return "success must be boolean"
-    if "duration_ms" in event:
-        try:
-            int(event["duration_ms"])
-        except (TypeError, ValueError):
-            return "duration_ms must be integer"
+    for key in NUMBER_KEYS | LEGACY_NUMBER_KEYS:
+        if key not in event:
+            continue
+        if parse_number(event[key]) is None:
+            return f"{key} must be number"
+    if "is_full_pipeline" in event and not isinstance(event["is_full_pipeline"], bool):
+        return "is_full_pipeline must be boolean"
+    if "steps" in event and not isinstance(event["steps"], str):
+        return "steps must be string"
+    if "step_trace" in event and not isinstance(event["step_trace"], str):
+        return "step_trace must be string"
     return None
 
 
@@ -737,7 +811,7 @@ def check_auth(handler: BaseHTTPRequestHandler, raw_body: bytes = b"") -> bool:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "TelemetryGateway/2.0.0"
+    server_version = "TelemetryGateway/2.0.1"
 
     def do_GET(self) -> None:
         path = urllib.parse.urlparse(self.path).path

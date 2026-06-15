@@ -1,6 +1,6 @@
 # gerrit-pipeline — 使用说明
 
-**版本：v2.0.0**
+**版本：v2.0.1**
 
 gerrit-pipeline 是一个 Claude Code 优先、Agent Neutral 兼容的 Skill，为车联 AutoLink 团队提供 Gerrit 代码提交评审一站式自动化能力。Claude Code 中可获得最佳体验：斜杠命令、结构化确认、多选、Skill 调用都能直接串联；其他 Agent 只要支持读取 skill 文档、执行脚本、与用户确认/选择，也可以按同一流程执行。v1.9.0 起，原 Step 3（Checklist 确认）与原 Step 3.5（飞书通知前确认）合并为单一确认屏，在不降低安全红线的前提下减少交互弹窗。目标是减少重复操作、统一提交规范、加速 Code Review 闭环。
 
@@ -250,6 +250,8 @@ v2.0.0 起，gerrit-pipeline 默认启用内部运行指标上报。配置随 sk
 
 上报在后台执行，请求使用 HMAC-SHA256、时间戳和 nonce 签名，不影响代码提交、评审、Checklist 或飞书通知主流程。网络不可达时，事件会暂存在本地队列，并在后续 pipeline 运行且网络可用时补发。
 
+运行指标会记录用户入口、实际执行步骤顺序、是否完成全流程、Agent 类型、总耗时和各步骤耗时，用于后续分析流程稳定性与体验瓶颈。
+
 ## 7. 依赖
 
 1. Python 3.6+
@@ -279,13 +281,14 @@ v2.0.0 起，gerrit-pipeline 默认启用内部运行指标上报。配置随 sk
 
 对应飞书使用手册：https://t83dfrspj4.feishu.cn/wiki/Tzq1wRg5biiaCLkcx2gcgcb6nO1
 
-流程 A 用于飞书 zip 手动分发：本地清空 `release/` 后生成当前版本 zip，不通过飞书 API 上传，文件由维护者手动替换。
+流程 A 用于飞书 zip 手动分发：本地清空 `release/` 后生成用户侧 skill zip；如维护 Gateway，同步生成管理员侧 gateway zip；不通过飞书 API 上传，文件由维护者手动替换。
 流程 B 用于 SkillPack 发布：以 `skill.json` 为版本与元数据 SOT，通过 SkillPack 客户端完成 lint、打包与发布，当前 SkillPack 发布通道为 `claude-code`；`her`、`cursor`、`codex` 和通用 `agent` 兼容性写入描述与标签，后续如需对应端上架需从对应客户端单独发布。
 
 ## 10. 版本历史
 
 | 版本 | 日期 | 变更摘要 |
 |------|------|---------|
+| v2.0.1 | 2026-06-15 | 1. 补强遥测字段：新增 `entry_mode`、`steps`、`is_full_pipeline`、`run_id` 和 `agent_source`，准确记录入口、步骤顺序、是否全流程和运行时来源<br>2. 耗时字段统一为秒级 `duration_s` / `*_duration_s`，Gateway 兼容旧毫秒字段并自动派生到新列<br>3. 新增 Gateway 管理脚本和 run context 自动清理，便于管理员查看状态、重启服务和控制本地缓存 |
 | v2.0.0 | 2026-06-12 | 1. 默认启用内部运行指标上报，配置随 skill 分发，用户无需额外配置<br>2. 新增本地 spool 队列，网络不可达或后台进程拉起失败时保留事件，下次运行批量补发<br>3. 新增 Telemetry Gateway，接收端先异步入库再由后台 flush 到飞书多维表格，并按 `event_id` 做幂等保护 |
 | v1.9.7 | 2026-06-03 | 1. 补齐发布包中的 `references/full-spec.md`，避免用户更新后完整规范文档缺失<br>2. 流程 A 增加 zip 内容校验，流程 B 增加 SkillPack tarball 内容校验，避免后续发版再次遗漏完整规范<br>3. 不改变用户配置、主流程行为和既有升级路径 |
 | v1.9.6 | 2026-06-01 | 1. 放开 Gerrit Pipeline JIRA-ID 前缀白名单，不再枚举固定项目 Key<br>2. JIRA-ID 校验改为通用 Jira Key 形态：项目 Key 以大写字母开头，可包含大写字母和数字，后接 `-` 与数字编号<br>3. 保留 JIRA-ID 用户确认、中文方括号包裹和真实工单要求，提升新增项目兼容性 |

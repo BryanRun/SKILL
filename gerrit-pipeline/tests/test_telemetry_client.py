@@ -1,9 +1,12 @@
 import importlib.util
+import contextlib
+import io
 import json
 import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -51,6 +54,10 @@ class TelemetryClientTest(unittest.TestCase):
                 "GERRIT_PIPELINE_TELEMETRY_INSTALL_ID",
                 "GERRIT_PIPELINE_TELEMETRY_SUBMITTER",
                 "GERRIT_PIPELINE_AGENT",
+                "CODEX_SANDBOX",
+                "CODEX_CLI",
+                "CLAUDECODE",
+                "CLAUDE_CODE",
             ]
         }
         for key in self.old_env:
@@ -79,8 +86,14 @@ class TelemetryClientTest(unittest.TestCase):
             "event_id": "evt-test",
             "event_type": "pipeline_done",
             "mode": "submit",
+            "entry_mode": "",
+            "steps": "",
+            "is_full_pipeline": None,
             "success": True,
-            "duration_ms": 123,
+            "duration_s": 0,
+            "duration_ms": 123000,
+            "run_id": "",
+            "step_durations": "",
             "repo_count": 2,
             "agent": "codex",
             "submitter_name": "tester",
@@ -100,14 +113,119 @@ class TelemetryClientTest(unittest.TestCase):
         event = self.client.build_event(self._args(), cfg)
 
         self.assertEqual(event["event_id"], "evt-test")
-        self.assertEqual(event["schema_version"], "1.0")
+        self.assertEqual(event["schema_version"], "1.1")
         self.assertEqual(event["skill"], "gerrit-pipeline")
-        self.assertEqual(event["skill_version"], "2.0.0")
+        self.assertEqual(event["skill_version"], "2.0.1")
         self.assertEqual(event["success"], True)
-        self.assertEqual(event["duration_ms"], 123)
+        self.assertEqual(event["duration_s"], 123.0)
         self.assertEqual(event["repo_count"], 2)
+        self.assertEqual(event["agent"], "codex")
+        self.assertEqual(event["agent_source"], "explicit")
         self.assertEqual(event["install_id"], "install-1")
         self.assertEqual(event["submitter_name"], "tester")
+
+    def test_build_event_includes_pipeline_shape_fields(self):
+        os.environ["GERRIT_PIPELINE_TELEMETRY_INSTALL_ID"] = "install-1"
+
+        event = self.client.build_event(
+            self._args(
+                mode="unknown",
+                entry_mode="submit",
+                steps="submit,review,checklist,notify",
+                step_durations="submit=10000,review=20000,checklist=30000,notify=40000",
+            ),
+            {},
+        )
+
+        self.assertEqual(event["mode"], "full_pipeline")
+        self.assertEqual(event["entry_mode"], "submit")
+        self.assertEqual(event["steps"], "submit,review,checklist,notify")
+        self.assertTrue(event["is_full_pipeline"])
+        self.assertEqual(event["submit_duration_s"], 10.0)
+        self.assertEqual(event["review_duration_s"], 20.0)
+        self.assertEqual(event["checklist_duration_s"], 30.0)
+        self.assertEqual(event["notify_duration_s"], 40.0)
+        self.assertIn('"name": "submit"', event["step_trace"])
+        self.assertIn('"duration_s": 10.0', event["step_trace"])
+
+    def test_detect_agent_falls_back_to_unknown_not_user(self):
+        os.environ["USER"] = "hualei"
+        original_detect = self.client.detect_agent_from_process_tree
+        self.client.detect_agent_from_process_tree = lambda: ""
+
+        try:
+            agent, source = self.client.detect_agent_with_source()
+        finally:
+            self.client.detect_agent_from_process_tree = original_detect
+
+        self.assertEqual(agent, "unknown")
+        self.assertEqual(source, "fallback")
+
+    def test_run_context_tracks_steps_and_duration(self):
+        os.environ["GERRIT_PIPELINE_AGENT"] = "codex"
+        with contextlib.redirect_stdout(io.StringIO()):
+            start_rc = self.client.main([
+                "--run-start",
+                "--mode", "full_pipeline",
+                "--entry-mode", "submit",
+                "--run-id", "run-test",
+            ])
+            step_start_rc = self.client.main(["--run-id", "run-test", "--step-start", "submit"])
+            step_finish_rc = self.client.main(["--run-id", "run-test", "--step-finish", "submit"])
+
+        event = self.client.build_event(
+            self._args(
+                event_id="evt-run",
+                mode="unknown",
+                duration_s=0,
+                duration_ms=0,
+                run_id="run-test",
+                agent="",
+            ),
+            {},
+        )
+
+        self.assertEqual(start_rc, 0)
+        self.assertEqual(step_start_rc, 0)
+        self.assertEqual(step_finish_rc, 0)
+        self.assertEqual(event["run_id"], "run-test")
+        self.assertEqual(event["mode"], "single_step")
+        self.assertEqual(event["entry_mode"], "submit")
+        self.assertEqual(event["steps"], "submit")
+        self.assertFalse(event["is_full_pipeline"])
+        self.assertEqual(event["agent"], "codex")
+        self.assertIn(event["agent_source"], {"env", "run_context"})
+        self.assertGreaterEqual(event["duration_s"], 0)
+        self.assertIn("submit_duration_s", event)
+
+    def test_run_context_prunes_old_and_overflow_files(self):
+        original_max_contexts = self.client.MAX_RUN_CONTEXTS
+        original_max_age = self.client.MAX_RUN_CONTEXT_AGE_SECONDS
+        self.client.MAX_RUN_CONTEXTS = 2
+        self.client.MAX_RUN_CONTEXT_AGE_SECONDS = 60
+        try:
+            os.makedirs(self.client.RUNS_DIR, mode=0o700, exist_ok=True)
+            old_path = Path(self.client.RUNS_DIR) / "old.json"
+            old_path.write_text("{}\n", encoding="utf-8")
+            old_time = time.time() - 120
+            os.utime(old_path, (old_time, old_time))
+
+            for index in range(3):
+                path = Path(self.client.RUNS_DIR) / f"keep-{index}.json"
+                path.write_text("{}\n", encoding="utf-8")
+                stamp = time.time() - (10 - index)
+                os.utime(path, (stamp, stamp))
+
+            saved = self.client.save_run_context("new", {"run_id": "new"})
+            paths = list(Path(self.client.RUNS_DIR).glob("*.json"))
+
+            self.assertTrue(saved)
+            self.assertFalse(old_path.exists())
+            self.assertTrue((Path(self.client.RUNS_DIR) / "new.json").exists())
+            self.assertLessEqual(len(paths), 2)
+        finally:
+            self.client.MAX_RUN_CONTEXTS = original_max_contexts
+            self.client.MAX_RUN_CONTEXT_AGE_SECONDS = original_max_age
 
     def test_build_event_includes_failure_stage_when_provided(self):
         os.environ["GERRIT_PIPELINE_TELEMETRY_INSTALL_ID"] = "install-1"
@@ -137,7 +255,7 @@ class TelemetryClientTest(unittest.TestCase):
         self.assertFalse(user_config.exists())
         self.assertTrue(settings["enabled"])
         self.assertEqual(settings["url"], "http://10.70.55.96:18080")
-        self.assertEqual(settings["key_id"], "gerrit-pipeline-v2.0.0")
+        self.assertEqual(settings["key_id"], "gerrit-pipeline-v2.0.1")
         self.assertEqual(settings["timeout"], 2.0)
         self.assertTrue(settings["hmac_secret"])
 
@@ -190,7 +308,7 @@ class TelemetryClientTest(unittest.TestCase):
                 {
                     "enabled": True,
                     "url": "http://example",
-                    "key_id": "gerrit-pipeline-v2.0.0",
+                    "key_id": "gerrit-pipeline-v2.0.1",
                     "hmac_secret": "secret",
                     "timeout": 1,
                 }
@@ -235,7 +353,7 @@ class TelemetryClientTest(unittest.TestCase):
         self.addCleanup(server.shutdown)
         url = f"http://127.0.0.1:{server.server_address[1]}"
         os.environ["GERRIT_PIPELINE_TELEMETRY_URL"] = url
-        os.environ["GERRIT_PIPELINE_TELEMETRY_KEY_ID"] = "gerrit-pipeline-v2.0.0"
+        os.environ["GERRIT_PIPELINE_TELEMETRY_KEY_ID"] = "gerrit-pipeline-v2.0.1"
         os.environ["GERRIT_PIPELINE_TELEMETRY_HMAC_SECRET"] = "secret"
         os.environ["GERRIT_PIPELINE_TELEMETRY_INSTALL_ID"] = "install-2"
 
@@ -244,7 +362,7 @@ class TelemetryClientTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(CaptureHandler.captured["path"], "/telemetry/events")
         self.assertIsNone(CaptureHandler.captured["auth"])
-        self.assertEqual(CaptureHandler.captured["key_id"], "gerrit-pipeline-v2.0.0")
+        self.assertEqual(CaptureHandler.captured["key_id"], "gerrit-pipeline-v2.0.1")
         self.assertTrue(CaptureHandler.captured["timestamp"])
         self.assertTrue(CaptureHandler.captured["nonce"])
         self.assertEqual(len(CaptureHandler.captured["body_hash"]), 64)

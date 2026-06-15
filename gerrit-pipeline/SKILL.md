@@ -169,7 +169,7 @@ python3 scripts/feishu_notify.py \
 
 发版流程分两类：
 
-- 流程 A：飞书 zip 手动分发。本地清空 `release/` 后生成当前版本 zip，不通过飞书 API 上传。
+- 流程 A：飞书 zip 手动分发。本地清空 `release/` 后生成用户侧 skill zip；如维护 Gateway，同步生成管理员侧 gateway zip；不通过飞书 API 上传。
 - 流程 B：SkillPack 发布。以 `skill.json` 为版本与元数据 SOT，通过 SkillPack 客户端执行 lint、打包与 publish。
 
 详细命令和版本历史见 `references/full-spec.md`。
@@ -178,23 +178,38 @@ python3 scripts/feishu_notify.py \
 
 ## 执行遥测
 
-Telemetry 默认启用，固定上报到内网 Telemetry Gateway，版本 key 和 HMAC 签名密钥随 skill 内部分发，请求带时间戳与 nonce 防重放。完整流水线执行开始时记录开始时间；最终报告输出前先后台触发
+Telemetry 默认启用，固定上报到内网 Telemetry Gateway，版本 key 和 HMAC 签名密钥随 skill 内部分发，请求带时间戳与 nonce 防重放。完整流水线执行开始时必须创建 run context；每个 step 结束时记录耗时；最终报告输出前先后台触发
 `scripts/telemetry_client.py` 发送一次 `pipeline_done` 事件，然后立即输出最终报告。Telemetry 发送失败不得影响主流程结论；失败事件会暂存在本地队列，下次 pipeline 启动且网络可用时批量补发。
 
 ```bash
-_GP_START=$(date +%s%3N)
+RUN_ID="$(python3 scripts/telemetry_client.py \
+  --run-start \
+  --mode full_pipeline \
+  --entry-mode submit \
+  --agent codex)"
+
+python3 scripts/telemetry_client.py --run-id "$RUN_ID" --step-start submit
+# 执行 Step 1
+python3 scripts/telemetry_client.py --run-id "$RUN_ID" --step-finish submit
+
+python3 scripts/telemetry_client.py --run-id "$RUN_ID" --step-start review
+# 执行 Step 2
+python3 scripts/telemetry_client.py --run-id "$RUN_ID" --step-finish review
 
 python3 scripts/telemetry_client.py \
   --background \
+  --run-id "$RUN_ID" \
   --event-type pipeline_done \
-  --mode submit \
+  --mode full_pipeline \
+  --entry-mode submit \
+  --steps submit,review,checklist,notify \
+  --is-full-pipeline true \
+  --agent codex \
   --success true \
-  --duration-ms "$(($(date +%s%3N) - _GP_START))" \
   --repo-count 1
 ```
 
 失败场景将 `--success false`，并传入稳定的 `--error-code`，如
 `step1_submit_failed`、`step3_checklist_failed` 或 `step4_notify_failed`；
 同时传入 `--failure-stage`，如 `submit`、`review`、`checklist` 或 `notify`。
-独立操作可将 `--mode` 设置为 `submit`、`amend`、`cherry-pick`、
-`review`、`checklist` 或 `notify`。
+`--agent` 必须由执行 Agent 显式传入，如 `claude-code`、`codex`、`cursor`、`deepseek`、`qwen`；无法判断时传 `unknown`。独立操作使用 `--mode single_step`，并用 `--entry-mode` 与 `--steps` 记录真实入口和执行步骤。

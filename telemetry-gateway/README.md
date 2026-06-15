@@ -31,7 +31,7 @@ Edit `.env`:
 
 ```bash
 TELEMETRY_ADMIN_TOKEN=<admin-token>
-TELEMETRY_HMAC_KEYS={"gerrit-pipeline-v2.0.0":"<hmac-secret>"}
+TELEMETRY_HMAC_KEYS={"gerrit-pipeline-v2.0.1":"<hmac-secret>"}
 TELEMETRY_REVOKED_KEY_IDS=
 FEISHU_APP_ID=<feishu-app-id>
 FEISHU_APP_SECRET=<feishu-app-secret>
@@ -59,14 +59,24 @@ Create a table with these field names and compatible types:
 | `skill_version` | Text |
 | `event_type` | Text |
 | `mode` | Text |
+| `entry_mode` | Text |
+| `steps` | Text |
+| `is_full_pipeline` | Checkbox |
 | `success` | Checkbox |
-| `duration_ms` | Number |
+| `duration_s` | Number |
+| `submit_duration_s` | Number |
+| `review_duration_s` | Number |
+| `checklist_duration_s` | Number |
+| `notify_duration_s` | Number |
+| `step_trace` | Long text |
 | `submitter_name` | Text |
 | `agent` | Text |
+| `agent_source` | Text |
 | `repo_count` | Number |
 | `error_code` | Text |
 | `failure_stage` | Text |
 | `install_id` | Text |
+| `run_id` | Text |
 | `gateway_key_id` | Text |
 | `raw_payload` | Long text |
 
@@ -74,6 +84,12 @@ If the Bitable field names differ, set `TELEMETRY_FIELD_MAP` to a JSON object
 that maps only the changed event keys to Bitable field names. The map is merged
 over the default field map. If a mapped field does not exist in the Bitable
 table yet, the Gateway skips that field instead of failing the whole flush.
+
+For gerrit-pipeline 2.0.1, `schema_version=1.1` uses seconds for all duration
+fields. The Gateway still accepts legacy `duration_ms` and `*_duration_ms`
+payloads from older clients and writes the derived values into the new `*_s`
+fields. Do not add new `*_ms` columns for the 2.0.1 telemetry table unless you
+need them only for historical migration.
 
 ## Start
 
@@ -144,9 +160,10 @@ systemctl --user enable --now telemetry-gateway
 
 ## Admin Runbook
 
-The current recommended deployment is a normal user process on the target
-internal server `10.70.55.96`. Use `ensure-running.sh` plus crontab keepalive
-unless a server administrator later moves the service to systemd.
+The current recommended deployment is a normal user process under
+`/home/hualei/services/telemetry-gateway` on the target internal server
+`10.70.55.96`. Use `ensure-running.sh` plus crontab keepalive unless a server
+administrator later moves the service to systemd.
 
 ### Production Configuration
 
@@ -173,21 +190,27 @@ primary write authorization mechanism.
 Start or repair the background process:
 
 ```bash
-cd /home/hualei/00_COMMON/2_Repo/SKILL/telemetry-gateway
+cd /home/hualei/services/telemetry-gateway
 ./scripts/ensure-running.sh
 ```
 
 Install keepalive for user-level operation:
 
 ```cron
-@reboot /home/hualei/00_COMMON/2_Repo/SKILL/telemetry-gateway/scripts/ensure-running.sh
-* * * * * /home/hualei/00_COMMON/2_Repo/SKILL/telemetry-gateway/scripts/ensure-running.sh
+@reboot /home/hualei/services/telemetry-gateway/scripts/ensure-running.sh
+* * * * * /home/hualei/services/telemetry-gateway/scripts/ensure-running.sh
 ```
 
 `ensure-running.sh` checks the pid file and `/healthz`. If the process is not
 healthy, it stops the stale pid and starts a new process.
 
 ### Stop And Restart
+
+Show status:
+
+```bash
+./scripts/status.sh
+```
 
 Stop:
 
@@ -198,8 +221,7 @@ Stop:
 Restart after `.env` changes:
 
 ```bash
-./scripts/stop.sh
-./scripts/ensure-running.sh
+./scripts/restart.sh
 ```
 
 Restart is required after changing HMAC keys, admin token, Feishu credentials,
@@ -208,25 +230,12 @@ only at process startup.
 
 ### Daily Checks
 
-Public liveness:
-
 ```bash
-curl -i http://10.70.55.96:18080/healthz
+./scripts/status.sh
 ```
 
-Admin readiness:
-
-```bash
-curl -i http://10.70.55.96:18080/readyz \
-  -H "Authorization: Bearer $TELEMETRY_ADMIN_TOKEN"
-```
-
-Queue metrics:
-
-```bash
-curl -s http://10.70.55.96:18080/metrics \
-  -H "Authorization: Bearer $TELEMETRY_ADMIN_TOKEN"
-```
+The status script is read-only. It prints pid status, `/healthz`, `/readyz`,
+`/metrics`, database path, log path, and recent warning/error log lines.
 
 Manual flush:
 
@@ -252,14 +261,14 @@ Then restart the Gateway and submit a signed test event:
 
 ```bash
 GERRIT_PIPELINE_TELEMETRY_URL=http://10.70.55.96:18080 \
-GERRIT_PIPELINE_TELEMETRY_KEY_ID=gerrit-pipeline-v2.0.0 \
+GERRIT_PIPELINE_TELEMETRY_KEY_ID=gerrit-pipeline-v2.0.1 \
 GERRIT_PIPELINE_TELEMETRY_HMAC_SECRET=<same-hmac-secret> \
 GERRIT_PIPELINE_TELEMETRY_INSTALL_ID=manual-test \
 python3 ../gerrit-pipeline/scripts/telemetry_client.py \
   --event-type pipeline_done \
   --mode submit \
   --success true \
-  --duration-ms 1000 \
+  --duration-s 1 \
   --repo-count 1 \
   --submitter-name gateway-admin \
   --strict \
@@ -307,10 +316,13 @@ Client-side temporary retry queue on user machines:
 ```text
 ~/.cache/gerrit-pipeline/telemetry-queue/
 ~/.cache/gerrit-pipeline/telemetry-dead-letter/
+~/.cache/gerrit-pipeline/runs/
 ```
 
 The Gateway SQLite database is the server-side queue. Client spool files are
-only used when a user's machine cannot reach the Gateway.
+only used when a user's machine cannot reach the Gateway. The `runs/` directory
+stores temporary step timing context and is pruned by the client to 200 files or
+14 days.
 
 ### Common Issues
 
@@ -349,14 +361,14 @@ curl -i "$GATEWAY_URL/readyz" \
 ```bash
 GATEWAY_URL=http://10.70.55.96:18080
 GERRIT_PIPELINE_TELEMETRY_URL="$GATEWAY_URL" \
-GERRIT_PIPELINE_TELEMETRY_KEY_ID=gerrit-pipeline-v2.0.0 \
+GERRIT_PIPELINE_TELEMETRY_KEY_ID=gerrit-pipeline-v2.0.1 \
 GERRIT_PIPELINE_TELEMETRY_HMAC_SECRET=<hmac-secret> \
 GERRIT_PIPELINE_TELEMETRY_INSTALL_ID=manual-test \
 python3 ../gerrit-pipeline/scripts/telemetry_client.py \
   --event-type pipeline_done \
   --mode submit \
   --success true \
-  --duration-ms 12345 \
+  --duration-s 12.3 \
   --repo-count 1 \
   --submitter-name demo \
   --strict \

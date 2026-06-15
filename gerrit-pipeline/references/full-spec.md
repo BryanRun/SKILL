@@ -1407,7 +1407,7 @@ python3 pipeline_config.py remove-project --name "D01"
 ## 执行遥测
 
 Telemetry 默认启用，固定上报到内网 Telemetry Gateway，版本 key 和 HMAC 签名密钥随 skill 内部
-`scripts/telemetry_defaults.json` 分发，用户侧不需要也不展示 telemetry 配置。完整流水线开始时记录开始时间；最终报告输出前，执行 Agent 先调用
+`scripts/telemetry_defaults.json` 分发，用户侧不需要也不展示 telemetry 配置。完整流水线开始时创建 run context，并在每个 step 开始/结束时记录真实执行顺序和耗时；最终报告输出前，执行 Agent 先调用
 `scripts/telemetry_client.py` 后台发送一次 `pipeline_done` 事件，然后立即输出最终报告。网关不可达、后台进程拉起失败或发送失败时，不得影响主流程状态和用户报告。
 
 ### 配置
@@ -1431,25 +1431,49 @@ Telemetry 默认配置保存在 skill 内部 `scripts/telemetry_defaults.json`�
 
 ### 调用规范
 
-完整流水线必须在最终报告输出前后台触发 telemetry，然后立即输出最终报告，避免用户体感等待 telemetry，也避免 final response 后无法再执行工具调用。
+完整流水线必须在最终报告输出前后台触发 telemetry，然后立即输出最终报告，避免用户体感等待 telemetry，也避免 final response 后无法再执行工具调用。`--agent` 必须由执行 Agent 显式传入；无法判断时传 `unknown`，不得回退为系统用户名。
 
 ```bash
-_GP_START=$(date +%s%3N)
+RUN_ID="$(python3 <skill_dir>/scripts/telemetry_client.py \
+  --run-start \
+  --mode full_pipeline \
+  --entry-mode submit \
+  --agent codex)"
+
+python3 <skill_dir>/scripts/telemetry_client.py --run-id "$RUN_ID" --step-start submit
+# Step 1: submit
+python3 <skill_dir>/scripts/telemetry_client.py --run-id "$RUN_ID" --step-finish submit
+
+python3 <skill_dir>/scripts/telemetry_client.py --run-id "$RUN_ID" --step-start review
+# Step 2: review
+python3 <skill_dir>/scripts/telemetry_client.py --run-id "$RUN_ID" --step-finish review
+
+python3 <skill_dir>/scripts/telemetry_client.py --run-id "$RUN_ID" --step-start checklist
+# Step 3: checklist
+python3 <skill_dir>/scripts/telemetry_client.py --run-id "$RUN_ID" --step-finish checklist
+
+python3 <skill_dir>/scripts/telemetry_client.py --run-id "$RUN_ID" --step-start notify
+# Step 4: notify
+python3 <skill_dir>/scripts/telemetry_client.py --run-id "$RUN_ID" --step-finish notify
 
 python3 <skill_dir>/scripts/telemetry_client.py \
   --background \
+  --run-id "$RUN_ID" \
   --event-type pipeline_done \
-  --mode submit \
+  --mode full_pipeline \
+  --entry-mode submit \
+  --steps submit,review,checklist,notify \
+  --is-full-pipeline true \
+  --agent codex \
   --success true \
-  --duration-ms "$(($(date +%s%3N) - _GP_START))" \
   --repo-count 1
 ```
 
 失败场景必须传入 `--success false` 和稳定的 `--error-code`，例如：
 `step1_submit_failed`、`step2_review_failed`、`step3_checklist_failed`、
 `step4_notify_failed`；同时建议传入 `--failure-stage`，如 `submit`、
-`review`、`checklist` 或 `notify`。独立操作使用对应 `--mode`：
-`submit`、`amend`、`cherry-pick`、`review`、`checklist` 或 `notify`。
+`review`、`checklist` 或 `notify`。独立操作使用 `--mode single_step`，
+并用 `--entry-mode` 与 `--steps` 记录真实入口和执行步骤；多步但未完整执行四步时使用 `--mode partial_pipeline`。
 
 ### 本地队列
 
@@ -1467,18 +1491,33 @@ python3 <skill_dir>/scripts/telemetry_client.py \
 
 后台进程拉起失败时，客户端必须直接将当前事件写入本地队列，保证触发过的事件不会因为后台进程失败而丢失。
 
+Run context 只用于跨 shell 记录本次流程的真实步骤和耗时，不是发送队列：
+
+```text
+~/.cache/gerrit-pipeline/runs/
+```
+
+客户端每次保存 run context 时自动清理旧上下文，最多保留 200 个、最长保留 14 天。
+
 ### 事件字段
 
 | 字段 | 说明 |
 |------|------|
-| `schema_version` | 当前固定为 `1.0` |
+| `schema_version` | 当前固定为 `1.1`；`1.1` 使用秒级 duration 字段 |
 | `skill` / `skill_version` | 固定为 `gerrit-pipeline` 与 README 版本 |
 | `event_type` | 默认 `pipeline_done` |
-| `mode` | 本次执行模式 |
+| `mode` | 流程类型：`full_pipeline` / `partial_pipeline` / `single_step` / `unknown` |
+| `entry_mode` | 用户入口，如 `submit` / `amend` / `cherry_pick` / `notify` |
+| `steps` / `is_full_pipeline` | 按真实顺序记录的步骤列表，以及是否完成全流程 |
 | `success` / `error_code` / `failure_stage` | 执行结果、失败分类与失败阶段 |
-| `duration_ms` / `repo_count` | 耗时与涉及仓库数量 |
-| `submitter_name` / `agent` / `install_id` | 提交人、运行时和安装标识 |
+| `duration_s` / `repo_count` | 总耗时（秒）与涉及仓库数量 |
+| `submit_duration_s` / `review_duration_s` / `checklist_duration_s` / `notify_duration_s` | 各步骤耗时（秒） |
+| `step_trace` | 完整步骤轨迹 JSON 字符串，保留开始/结束时间和每步秒级耗时 |
+| `submitter_name` / `agent` / `agent_source` / `install_id` | 提交人、运行时、运行时来源和安装标识 |
+| `run_id` | 本次流程上下文 id，用于跨 shell 记录耗时 |
 | `gateway_key_id` | Gateway 验签后派生的版本 key id，不由客户端发送 |
+
+`schema_version=1.1` 以 `duration_s` 和各 `*_duration_s` 字段作为统计口径。Gateway 可兼容旧客户端的 `duration_ms` / `*_duration_ms` 并派生写入新秒级字段，但 2.0.1 新增多维表字段以 `*_s` 为准。
 
 ---
 
@@ -1545,7 +1584,7 @@ python3 <skill_dir>/scripts/telemetry_client.py \
 
 对应飞书使用手册：https://t83dfrspj4.feishu.cn/wiki/Tzq1wRg5biiaCLkcx2gcgcb6nO1
 
-执行打包前必须先清空仓库根目录下的 `release/` 目录，再生成当前版本 zip 包，确保 `release/` 中只保留本次发布产物：
+执行打包前必须先清空仓库根目录下的 `release/` 目录，再生成当前版本发布产物：用户侧 `gerrit-pipeline` zip 和管理员侧 `telemetry-gateway` zip，确保 `release/` 中只保留本次发布产物：
 
 ```bash
 python3 -m py_compile \
@@ -1557,7 +1596,7 @@ python3 -m py_compile \
 
 mkdir -p release
 find release -mindepth 1 -maxdepth 1 -type f -delete
-zip -q release/gerrit-pipeline-v2.0.0.zip \
+zip -q release/gerrit-pipeline-v2.0.1.zip \
   gerrit-pipeline/README.md \
   gerrit-pipeline/SKILL.md \
   gerrit-pipeline/skill.json \
@@ -1570,15 +1609,29 @@ zip -q release/gerrit-pipeline-v2.0.0.zip \
   gerrit-pipeline/scripts/telemetry_client.py \
   gerrit-pipeline/scripts/telemetry_defaults.json
 
-unzip -l release/gerrit-pipeline-v2.0.0.zip
-unzip -l release/gerrit-pipeline-v2.0.0.zip | grep -F "gerrit-pipeline/references/full-spec.md"
-unzip -l release/gerrit-pipeline-v2.0.0.zip | grep -F "gerrit-pipeline/scripts/telemetry_client.py"
-unzip -l release/gerrit-pipeline-v2.0.0.zip | grep -F "gerrit-pipeline/scripts/telemetry_defaults.json"
-sha256sum release/gerrit-pipeline-v2.0.0.zip
+zip -q release/telemetry-gateway-v2.0.1.zip \
+  telemetry-gateway/README.md \
+  telemetry-gateway/.env.example \
+  telemetry-gateway/app.py \
+  telemetry-gateway/scripts/run.sh \
+  telemetry-gateway/scripts/ensure-running.sh \
+  telemetry-gateway/scripts/status.sh \
+  telemetry-gateway/scripts/restart.sh \
+  telemetry-gateway/scripts/stop.sh \
+  telemetry-gateway/systemd/telemetry-gateway.service
+
+unzip -l release/gerrit-pipeline-v2.0.1.zip
+unzip -l release/gerrit-pipeline-v2.0.1.zip | grep -F "gerrit-pipeline/references/full-spec.md"
+unzip -l release/gerrit-pipeline-v2.0.1.zip | grep -F "gerrit-pipeline/scripts/telemetry_client.py"
+unzip -l release/gerrit-pipeline-v2.0.1.zip | grep -F "gerrit-pipeline/scripts/telemetry_defaults.json"
+unzip -l release/telemetry-gateway-v2.0.1.zip
+unzip -l release/telemetry-gateway-v2.0.1.zip | grep -F "telemetry-gateway/scripts/status.sh"
+unzip -l release/telemetry-gateway-v2.0.1.zip | grep -F "telemetry-gateway/scripts/restart.sh"
+sha256sum release/gerrit-pipeline-v2.0.1.zip release/telemetry-gateway-v2.0.1.zip
 
 git status --short
 git add -A
-git commit -m "release: gerrit-pipeline v2.0.0"
+git commit -m "release: gerrit-pipeline v2.0.1"
 git push origin "$(git branch --show-current)"
 ```
 
@@ -1611,11 +1664,11 @@ tar -tzf "$TARBALL" | grep -F "scripts/telemetry_defaults.json"
 # 正式发布：wrapper 会依次执行 telemetry pre、SkillPack lint、publish、telemetry post
 bash ~/.openclaw/workspace/skills/skillpack-client/scripts/publish-with-telemetry.sh \
   gerrit-pipeline \
-  --changelog "gerrit-pipeline v2.0.0"
+  --changelog "gerrit-pipeline v2.0.1"
 
 git status --short
 git add -A
-git commit -m "release: gerrit-pipeline v2.0.0"
+git commit -m "release: gerrit-pipeline v2.0.1"
 git push origin "$(git branch --show-current)"
 ```
 
@@ -1624,6 +1677,13 @@ git push origin "$(git branch --show-current)"
 ---
 
 ## 版本历史
+
+### v2.0.1（2026/6/15）
+
+1. **遥测字段口径补强**：新增 `entry_mode`、`steps`、`is_full_pipeline`、`run_id` 与 `agent_source`，记录用户入口、真实步骤顺序、是否全流程和运行时来源
+2. **耗时统一为秒**：`schema_version` 升级为 `1.1`，对外字段统一使用 `duration_s` 与各 `*_duration_s`；旧 `duration_ms` / `*_duration_ms` 仅作为兼容输入
+3. **运行时识别收敛**：`agent` 优先由执行 Agent 显式传入，环境变量和进程树只作为兜底，探测失败时固定为 `unknown`，不再回退为系统用户名
+4. **Gateway 管理补强**：新增管理员状态与重启脚本，文档明确 Gateway 部署边界、状态验证方式和 run context 缓存清理策略
 
 ### v2.0.0（2026/6/12）
 

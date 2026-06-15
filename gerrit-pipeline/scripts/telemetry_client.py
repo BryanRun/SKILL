@@ -22,21 +22,46 @@ CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 CACHE_DIR = os.path.expanduser("~/.cache/gerrit-pipeline")
 QUEUE_DIR = os.path.join(CACHE_DIR, "telemetry-queue")
 DEAD_LETTER_DIR = os.path.join(CACHE_DIR, "telemetry-dead-letter")
+RUNS_DIR = os.path.join(CACHE_DIR, "runs")
+LATEST_RUN_ID_PATH = os.path.join(RUNS_DIR, "latest")
 DEFAULTS_PATH = os.path.join(SCRIPT_DIR, "telemetry_defaults.json")
 INSTALL_ID_PATH = os.path.join(CONFIG_DIR, "install_id")
 BACKGROUND_ENV = "GERRIT_PIPELINE_TELEMETRY_BACKGROUND"
 SKILL_NAME = "gerrit-pipeline"
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 MAX_QUEUE_EVENTS = 200
 MAX_DEAD_LETTER_EVENTS = 100
+MAX_RUN_CONTEXTS = 200
 FLUSH_BATCH_SIZE = 50
 MAX_QUEUE_AGE_SECONDS = 14 * 24 * 60 * 60
+MAX_RUN_CONTEXT_AGE_SECONDS = 14 * 24 * 60 * 60
 PERMANENT_HTTP_STATUS = {400, 401, 403, 413}
+FULL_PIPELINE_STEPS = ["submit", "review", "checklist", "notify"]
+STEP_DURATION_KEYS = {
+    "submit": "submit_duration_s",
+    "review": "review_duration_s",
+    "checklist": "checklist_duration_s",
+    "notify": "notify_duration_s",
+}
+AGENT_ALIASES = {
+    "claude": "claude-code",
+    "claude_code": "claude-code",
+    "claudecode": "claude-code",
+    "claude-code": "claude-code",
+    "codex": "codex",
+    "cursor": "cursor",
+    "deepseek": "deepseek",
+    "qwen": "qwen",
+    "tongyi": "qwen",
+    "dashscope": "qwen",
+    "doubao": "doubao",
+    "kimi": "kimi",
+}
 
 DEFAULT_TELEMETRY = {
     "enabled": True,
     "url": "http://10.70.55.96:18080",
-    "key_id": "gerrit-pipeline-v2.0.0",
+    "key_id": "gerrit-pipeline-v2.0.1",
     "timeout_seconds": 2,
 }
 
@@ -166,15 +191,71 @@ def get_submitter_name(cfg):
     return submitter.get("name") or ""
 
 
-def detect_agent():
+def normalize_agent(value):
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    text = text.replace(" ", "-")
+    return AGENT_ALIASES.get(text, text)
+
+
+def detect_agent_from_process_tree():
+    try:
+        pid = os.getpid()
+        for _ in range(8):
+            output = subprocess.check_output(  # pragma: allowlist subprocess
+                ["ps", "-o", "ppid=,comm=,args=", "-p", str(pid)],
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+            if not output:
+                break
+            parts = output.split(None, 2)
+            if not parts:
+                break
+            try:
+                ppid = int(parts[0])
+            except ValueError:
+                break
+            haystack = output.lower()
+            for marker, agent in (
+                ("claude", "claude-code"),
+                ("codex", "codex"),
+                ("cursor", "cursor"),
+                ("deepseek", "deepseek"),
+                ("qwen", "qwen"),
+                ("tongyi", "qwen"),
+                ("dashscope", "qwen"),
+                ("doubao", "doubao"),
+                ("kimi", "kimi"),
+            ):
+                if marker in haystack:
+                    return agent
+            if ppid <= 1 or ppid == pid:
+                break
+            pid = ppid
+    except Exception:
+        return ""
+    return ""
+
+
+def detect_agent_with_source():
     explicit = os.environ.get("GERRIT_PIPELINE_AGENT")
     if explicit:
-        return explicit
+        return normalize_agent(explicit), "env"
     if os.environ.get("CODEX_SANDBOX") or os.environ.get("CODEX_CLI"):
-        return "codex"
+        return "codex", "env"
     if os.environ.get("CLAUDECODE") or os.environ.get("CLAUDE_CODE"):
-        return "claude-code"
-    return os.environ.get("USER", "unknown")
+        return "claude-code", "env"
+    detected = detect_agent_from_process_tree()
+    if detected:
+        return detected, "process_tree"
+    return "unknown", "fallback"
+
+
+def detect_agent():
+    agent, _source = detect_agent_with_source()
+    return agent
 
 
 def get_install_id(cfg):
@@ -214,21 +295,432 @@ def client_time():
     return dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def now_ms():
+    return int(time.time() * 1000)
+
+
+def ms_to_seconds(ms):
+    try:
+        return round(max(int(ms), 0) / 1000, 1)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def seconds_value(value):
+    try:
+        return round(max(float(value), 0.0), 1)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def parse_steps(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        raw_items = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return []
+        raw_items = re.split(r"[,>\s]+", text)
+    steps = []
+    for item in raw_items:
+        step = str(item).strip().lower().replace("-", "_")
+        if step and step not in steps:
+            steps.append(step)
+    return steps
+
+
+def steps_to_string(steps):
+    return ",".join(parse_steps(steps))
+
+
+def is_full_pipeline_steps(steps):
+    return parse_steps(steps) == FULL_PIPELINE_STEPS
+
+
+def infer_mode(mode, steps):
+    if mode and mode != "unknown":
+        return mode
+    parsed_steps = parse_steps(steps)
+    if is_full_pipeline_steps(parsed_steps):
+        return "full_pipeline"
+    if len(parsed_steps) > 1:
+        return "partial_pipeline"
+    if len(parsed_steps) == 1:
+        return "single_step"
+    return "unknown"
+
+
+def safe_run_id(value):
+    text = str(value or "").strip()
+    if text == "latest":
+        return latest_run_id()
+    if not text:
+        return ""
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", text)[:120]
+
+
+def run_context_path(run_id):
+    safe_id = safe_run_id(run_id)
+    if not safe_id:
+        return ""
+    return os.path.join(RUNS_DIR, f"{safe_id}.json")
+
+
+def load_run_context(run_id):
+    path = run_context_path(run_id)
+    if not path:
+        return {}
+    data = read_json_file(path)
+    return data if isinstance(data, dict) else {}
+
+
+def latest_run_id():
+    try:
+        with open(LATEST_RUN_ID_PATH, "r", encoding="utf-8") as f:
+            text = f.read().strip()
+            if not text or text == "latest":
+                return ""
+            return re.sub(r"[^A-Za-z0-9_.-]", "_", text)[:120]
+    except OSError:
+        return ""
+
+
+def write_latest_run_id(run_id):
+    safe_id = safe_run_id(run_id)
+    if not safe_id:
+        return False
+    try:
+        os.makedirs(RUNS_DIR, mode=0o700, exist_ok=True)
+        with open(LATEST_RUN_ID_PATH, "w", encoding="utf-8") as f:
+            f.write(safe_id + "\n")
+        return True
+    except OSError:
+        return False
+
+
+def save_run_context(run_id, ctx):
+    path = run_context_path(run_id)
+    if not path:
+        return False
+    try:
+        os.makedirs(RUNS_DIR, mode=0o700, exist_ok=True)
+        tmp_path = f"{path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(ctx, f, ensure_ascii=False, sort_keys=True)
+            f.write("\n")
+        os.replace(tmp_path, path)
+        write_latest_run_id(run_id)
+        prune_run_contexts()
+        return True
+    except OSError:
+        return False
+
+
+def prune_run_contexts():
+    try:
+        paths = [
+            os.path.join(RUNS_DIR, name)
+            for name in os.listdir(RUNS_DIR)
+            if name.endswith(".json")
+        ]
+    except OSError:
+        return
+    if not paths:
+        return
+
+    now = time.time()
+    for path in paths:
+        try:
+            if now - os.path.getmtime(path) > MAX_RUN_CONTEXT_AGE_SECONDS:
+                os.unlink(path)
+        except OSError:
+            pass
+
+    try:
+        paths = [
+            os.path.join(RUNS_DIR, name)
+            for name in os.listdir(RUNS_DIR)
+            if name.endswith(".json")
+        ]
+    except OSError:
+        return
+    paths = sorted(paths, key=lambda path: (os.path.getmtime(path), path))
+    overflow = len(paths) - MAX_RUN_CONTEXTS
+    for path in paths[:max(0, overflow)]:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def resolve_run_id(run_id):
+    return safe_run_id(run_id) if run_id else latest_run_id()
+
+
+def step_trace_entry(ctx, step):
+    trace = ctx.setdefault("step_trace", [])
+    if not isinstance(trace, list):
+        trace = []
+        ctx["step_trace"] = trace
+    for item in reversed(trace):
+        if isinstance(item, dict) and item.get("name") == step and not item.get("finished_at_ms"):
+            return item
+    item = {"name": step}
+    trace.append(item)
+    return item
+
+
+def update_context_steps(ctx):
+    steps = []
+    for item in ctx.get("step_trace", []):
+        if not isinstance(item, dict):
+            continue
+        step = str(item.get("name") or "")
+        if step and step not in steps:
+            steps.append(step)
+    if steps:
+        ctx["steps"] = steps
+        ctx["is_full_pipeline"] = is_full_pipeline_steps(steps)
+    durations = step_durations_from_trace(ctx.get("step_trace", []))
+    if durations:
+        ctx["step_durations"] = durations
+    return ctx
+
+
+def handle_run_context_command(args):
+    if args.run_start:
+        run_id = resolve_run_id(args.run_id) or str(uuid.uuid4())
+        agent_source = "explicit" if args.agent else ""
+        if args.agent:
+            agent = normalize_agent(args.agent)
+        else:
+            agent, agent_source = detect_agent_with_source()
+        steps = parse_steps(args.steps)
+        ctx = {
+            "run_id": run_id,
+            "started_at": client_time(),
+            "started_at_ms": now_ms(),
+            "mode": infer_mode(args.mode, steps),
+            "entry_mode": args.entry_mode or (steps[0] if steps else ""),
+            "steps": steps,
+            "is_full_pipeline": optional_bool(args.is_full_pipeline)
+            if args.is_full_pipeline is not None else is_full_pipeline_steps(steps),
+            "agent": agent,
+            "agent_source": agent_source,
+            "step_trace": [],
+            "step_durations": {},
+        }
+        if not save_run_context(run_id, ctx):
+            print("failed to save telemetry run context", file=sys.stderr)
+            return 1
+        print(run_id)
+        return 0
+
+    step_name = args.step_start or args.step_finish
+    if not step_name:
+        return None
+    run_id = resolve_run_id(args.run_id)
+    if not run_id:
+        print("missing run context; pass --run-id or run --run-start first", file=sys.stderr)
+        return 1
+    ctx = load_run_context(run_id)
+    if not ctx:
+        print(f"run context not found: {run_id}", file=sys.stderr)
+        return 1
+    step = parse_steps(step_name)
+    if not step:
+        print("invalid step name", file=sys.stderr)
+        return 1
+    step = step[0]
+    entry = step_trace_entry(ctx, step)
+    if args.step_start:
+        entry["started_at"] = client_time()
+        entry["started_at_ms"] = now_ms()
+    else:
+        finished_ms = now_ms()
+        entry.setdefault("started_at_ms", finished_ms)
+        entry.setdefault("started_at", client_time())
+        entry["finished_at"] = client_time()
+        entry["finished_at_ms"] = finished_ms
+        try:
+            entry["duration_ms"] = max(finished_ms - int(entry["started_at_ms"]), 0)
+        except (TypeError, ValueError):
+            entry["duration_ms"] = 0
+    update_context_steps(ctx)
+    if not save_run_context(run_id, ctx):
+        print("failed to save telemetry run context", file=sys.stderr)
+        return 1
+    print(run_id)
+    return 0
+
+
+def parse_step_durations(value):
+    if not value:
+        return {}
+    if isinstance(value, dict):
+        source = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+            source = parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            source = {}
+            for item in text.split(","):
+                if "=" not in item:
+                    continue
+                key, raw_value = item.split("=", 1)
+                source[key.strip()] = raw_value.strip()
+    durations = {}
+    for key, raw_value in source.items():
+        step = str(key).strip().lower().replace("-", "_")
+        if not step:
+            continue
+        try:
+            durations[step] = max(int(raw_value), 0)
+        except (TypeError, ValueError):
+            continue
+    return durations
+
+
+def step_durations_from_trace(trace):
+    durations = {}
+    if not isinstance(trace, list):
+        return durations
+    for item in trace:
+        if not isinstance(item, dict):
+            continue
+        step = str(item.get("name") or "").strip().lower().replace("-", "_")
+        if not step:
+            continue
+        duration = item.get("duration_ms")
+        if duration is None and item.get("started_at_ms") is not None and item.get("finished_at_ms") is not None:
+            try:
+                duration = int(item["finished_at_ms"]) - int(item["started_at_ms"])
+            except (TypeError, ValueError):
+                duration = None
+        if duration is None:
+            continue
+        try:
+            durations[step] = max(int(duration), 0)
+        except (TypeError, ValueError):
+            continue
+    return durations
+
+
+def merge_step_durations(*items):
+    merged = {}
+    for item in items:
+        merged.update(parse_step_durations(item))
+    return merged
+
+
+def step_trace_for_event(ctx, step_durations):
+    trace = ctx.get("step_trace") if isinstance(ctx, dict) else None
+    if isinstance(trace, list) and trace:
+        normalized = []
+        for item in trace:
+            if not isinstance(item, dict):
+                continue
+            event_item = dict(item)
+            duration_ms = event_item.pop("duration_ms", None)
+            if event_item.get("duration_s") is None:
+                if duration_ms is not None:
+                    event_item["duration_s"] = ms_to_seconds(duration_ms)
+                elif (
+                    event_item.get("started_at_ms") is not None
+                    and event_item.get("finished_at_ms") is not None
+                ):
+                    try:
+                        event_item["duration_s"] = ms_to_seconds(
+                            int(event_item["finished_at_ms"]) - int(event_item["started_at_ms"])
+                        )
+                    except (TypeError, ValueError):
+                        event_item["duration_s"] = 0.0
+            normalized.append(event_item)
+        return normalized
+    return [
+        {"name": step, "duration_s": ms_to_seconds(duration)}
+        for step, duration in step_durations.items()
+    ]
+
+
 def build_event(args, cfg):
+    run_ctx = load_run_context(args.run_id) if getattr(args, "run_id", "") else {}
+    ctx_steps = run_ctx.get("steps", [])
+    arg_steps = parse_steps(getattr(args, "steps", ""))
+    steps = arg_steps or parse_steps(ctx_steps)
+    step_durations = merge_step_durations(
+        step_durations_from_trace(run_ctx.get("step_trace", [])),
+        run_ctx.get("step_durations", {}),
+        getattr(args, "step_durations", ""),
+    )
+    entry_mode = (
+        getattr(args, "entry_mode", "")
+        or run_ctx.get("entry_mode", "")
+        or (steps[0] if steps else "")
+    )
+    agent_source = "explicit" if getattr(args, "agent", "") else ""
+    if getattr(args, "agent", ""):
+        agent = normalize_agent(args.agent)
+    elif run_ctx.get("agent"):
+        agent = normalize_agent(run_ctx.get("agent"))
+        agent_source = run_ctx.get("agent_source") or "run_context"
+    else:
+        agent, agent_source = detect_agent_with_source()
+    duration_s = seconds_value(getattr(args, "duration_s", 0))
+    duration_ms = max(int(getattr(args, "duration_ms", 0)), 0)
+    if duration_s == 0 and duration_ms > 0:
+        duration_s = ms_to_seconds(duration_ms)
+    if duration_s == 0 and run_ctx.get("started_at_ms"):
+        try:
+            duration_s = ms_to_seconds(now_ms() - int(run_ctx["started_at_ms"]))
+        except (TypeError, ValueError):
+            duration_s = 0.0
+    raw_mode = getattr(args, "mode", "unknown")
+    if raw_mode == "unknown" and not steps and run_ctx.get("mode"):
+        raw_mode = run_ctx.get("mode")
+    mode = infer_mode(raw_mode, steps)
+    is_full_pipeline = optional_bool(getattr(args, "is_full_pipeline", None))
+    if is_full_pipeline is None and run_ctx.get("is_full_pipeline") is not None:
+        is_full_pipeline = optional_bool(run_ctx.get("is_full_pipeline"))
+    if is_full_pipeline is None:
+        is_full_pipeline = is_full_pipeline_steps(steps)
+
     event = {
         "event_id": args.event_id or str(uuid.uuid4()),
         "schema_version": SCHEMA_VERSION,
         "skill": SKILL_NAME,
         "skill_version": read_version(),
         "event_type": args.event_type,
-        "mode": args.mode,
+        "mode": mode,
         "success": bool(args.success),
-        "duration_ms": max(int(args.duration_ms), 0),
+        "duration_s": duration_s,
         "repo_count": max(int(args.repo_count), 0),
         "client_time": client_time(),
-        "agent": args.agent or detect_agent(),
+        "agent": agent,
+        "agent_source": agent_source,
         "install_id": get_install_id(cfg),
     }
+    if entry_mode:
+        event["entry_mode"] = entry_mode
+    if steps:
+        event["steps"] = steps_to_string(steps)
+        event["is_full_pipeline"] = bool(is_full_pipeline)
+    elif getattr(args, "is_full_pipeline", None) is not None:
+        event["is_full_pipeline"] = bool(is_full_pipeline)
+    if getattr(args, "run_id", ""):
+        event["run_id"] = safe_run_id(args.run_id)
+    for step, field in STEP_DURATION_KEYS.items():
+        if step in step_durations:
+            event[field] = ms_to_seconds(step_durations[step])
+    trace = step_trace_for_event(run_ctx, step_durations)
+    if trace:
+        event["step_trace"] = json.dumps(trace, ensure_ascii=False, sort_keys=True)
     submitter_name = args.submitter_name or get_submitter_name(cfg)
     if submitter_name:
         event["submitter_name"] = submitter_name
@@ -517,7 +1009,7 @@ def spawn_background(argv):
     env = os.environ.copy()
     env[BACKGROUND_ENV] = "1"
     try:
-        subprocess.Popen(
+        subprocess.Popen(  # pragma: allowlist subprocess
             [sys.executable, os.path.abspath(__file__), *child_args],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -576,9 +1068,18 @@ def emit(args):
 def build_parser():
     parser = argparse.ArgumentParser(description="Send gerrit-pipeline telemetry")
     parser.add_argument("--event-type", default="pipeline_done", help="event type")
-    parser.add_argument("--mode", default="unknown", help="pipeline mode, such as submit/amend/notify")
-    parser.add_argument("--success", required=True, type=parse_bool, help="true or false")
-    parser.add_argument("--duration-ms", default=0, type=int, help="pipeline duration in milliseconds")
+    parser.add_argument("--mode", default="unknown", help="pipeline type, such as full_pipeline/partial_pipeline/single_step")
+    parser.add_argument("--entry-mode", default="", help="user entry mode, such as submit/amend/cherry-pick/notify")
+    parser.add_argument("--steps", default="", help="actual executed steps in order, comma separated")
+    parser.add_argument("--is-full-pipeline", default=None, type=optional_bool, help="whether the run completed the full pipeline")
+    parser.add_argument("--success", default=None, type=parse_bool, help="true or false")
+    parser.add_argument("--duration-s", default=0, type=float, help="pipeline duration in seconds")
+    parser.add_argument("--duration-ms", default=0, type=int, help="legacy pipeline duration in milliseconds")
+    parser.add_argument("--run-id", default="", help="run context id for cross-shell duration tracking")
+    parser.add_argument("--run-start", action="store_true", help="create a run context and print its run id")
+    parser.add_argument("--step-start", default="", help="mark a step start in the run context")
+    parser.add_argument("--step-finish", default="", help="mark a step finish in the run context")
+    parser.add_argument("--step-durations", default="", help="legacy step durations, JSON object or k=v comma list in milliseconds")
     parser.add_argument("--repo-count", default=0, type=int, help="number of affected repositories")
     parser.add_argument("--error-code", default="", help="stable error code when success=false")
     parser.add_argument("--failure-stage", default="", help="failed pipeline stage, such as submit/review/checklist/notify")
@@ -596,6 +1097,11 @@ def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
     args = parser.parse_args(argv)
+    run_rc = handle_run_context_command(args)
+    if run_rc is not None:
+        return run_rc
+    if args.success is None:
+        parser.error("--success is required when sending telemetry events")
     if args.background and os.environ.get(BACKGROUND_ENV) != "1" and not args.dry:
         spawned = spawn_background(argv)
         if not spawned:
