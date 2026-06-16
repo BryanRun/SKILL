@@ -210,6 +210,32 @@ python3 scripts/telemetry_client.py \
 ```
 
 失败场景将 `--success false`，并传入稳定的 `--error-code`，如
-`step1_submit_failed`、`step3_checklist_failed` 或 `step4_notify_failed`；
+`step1_submit_failed`、`step2_review_failed`、`step3_checklist_failed` 或
+`step4_notify_failed`；
 同时传入 `--failure-stage`，如 `submit`、`review`、`checklist` 或 `notify`。
-`--agent` 必须由执行 Agent 显式传入，如 `claude-code`、`codex`、`cursor`、`deepseek`、`qwen`；无法判断时传 `unknown`。独立操作使用 `--mode single_step`，并用 `--entry-mode` 与 `--steps` 记录真实入口和执行步骤。
+`--agent` 必须由执行 Agent 显式传入，如 `claude-code`、`codex`、`cursor`、`deepseek`、`qwen`；无法判断时传 `unknown`。
+
+独立操作完成前也必须触发 telemetry，不得因为没有 full pipeline run context 而跳过。单步操作使用 `--mode single_step`，并用 `--entry-mode` 与 `--steps` 记录真实入口和执行步骤。完整流水线中不得套用独立操作 telemetry 模板；完整流水线只在最终报告输出前发送一次 `full_pipeline` 事件：
+
+| 独立操作 | `entry_mode` | `steps` | 失败 `error-code` | `failure-stage` |
+|---|---|---|---|---|
+| `pipeline submit` / `gerrit submit` | `submit` | `submit` | `step1_submit_failed` | `submit` |
+| `pipeline review` | `review` | `review` | `step2_review_failed` | `review` |
+| `pipeline checklist` | `checklist` | `checklist` | `step3_checklist_failed` | `checklist` |
+| `pipeline notify` / `飞书通知` | `notify` | `notify` | `step4_notify_failed` | `notify` |
+
+```bash
+python3 scripts/telemetry_client.py \
+  --background \
+  --event-type pipeline_done \
+  --mode single_step \
+  --entry-mode <submit|review|checklist|notify> \
+  --steps <submit|review|checklist|notify> \
+  --is-full-pipeline false \
+  --agent <agent> \
+  --success <true|false> \
+  --duration-s <耗时秒数> \
+  --repo-count <仓库或CR数量>
+```
+
+失败时在上述命令中追加 `--error-code <稳定错误码>` 和 `--failure-stage <阶段>`。Telemetry 调用必须发生在最终报告输出前；发送失败只进入本地队列，不影响独立操作的主流程结果。

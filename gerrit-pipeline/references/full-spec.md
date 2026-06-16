@@ -816,6 +816,25 @@ remote:   https://gerrit.auto-link.com.cn/c/.../+/<CR编号> ...
 
 触发 `pipeline submit` 时，仅执行本步骤。完成后输出 CR 编号和 URL，不继续后续步骤。
 
+最终报告输出前必须触发单步 telemetry：
+
+```bash
+python3 <skill_dir>/scripts/telemetry_client.py \
+  --background \
+  --event-type pipeline_done \
+  --mode single_step \
+  --entry-mode submit \
+  --steps submit \
+  --is-full-pipeline false \
+  --agent <agent> \
+  --success true \
+  --duration-s <耗时秒数> \
+  --repo-count <仓库数量>
+```
+
+提交失败时仍应在报告前触发 telemetry，将 `--success` 改为 `false`，并追加
+`--error-code step1_submit_failed --failure-stage submit`。Telemetry 失败不得改变提交流程的主结果。
+
 ### 失败处理
 
 - 如果 commit 或 push 失败，中止流水线，向用户报告错误
@@ -942,6 +961,26 @@ cd <skill_dir>/scripts && python3 gerrit_post_review.py \
 ### 独立操作
 
 触发 `pipeline review <CR编号>` 时，仅执行本步骤。如未提供 CR 编号，通过 `AskUserQuestion` 或等价交互能力询问。
+
+最终报告输出前必须触发单步 telemetry：
+
+```bash
+python3 <skill_dir>/scripts/telemetry_client.py \
+  --background \
+  --event-type pipeline_done \
+  --mode single_step \
+  --entry-mode review \
+  --steps review \
+  --is-full-pipeline false \
+  --agent <agent> \
+  --success true \
+  --duration-s <耗时秒数> \
+  --repo-count <CR数量>
+```
+
+评审脚本或贴回兜底失败时仍应在报告前触发 telemetry，将 `--success` 改为
+`false`，并追加 `--error-code step2_review_failed --failure-stage review`。
+Telemetry 失败不得改变评审流程的主结果。
 
 ### 失败处理
 
@@ -1091,6 +1130,26 @@ Checklist 的状态标注（`✓` / `o`）和评审结论建议的预选已在�
 
 - 触发 `pipeline checklist <CR编号>` 时，仅执行 Checklist 贴出（不发飞书）。执行 Agent 将 Checklist 模板原样贴出，不做任何标注或修改
 - 触发 `pipeline notify` / `飞书通知` 时，仅发送飞书通知（不贴 Checklist），视为用户已自行确认门禁，跳过合并确认屏
+
+`pipeline checklist` 的最终报告输出前必须触发单步 telemetry：
+
+```bash
+python3 <skill_dir>/scripts/telemetry_client.py \
+  --background \
+  --event-type pipeline_done \
+  --mode single_step \
+  --entry-mode checklist \
+  --steps checklist \
+  --is-full-pipeline false \
+  --agent <agent> \
+  --success true \
+  --duration-s <耗时秒数> \
+  --repo-count <CR数量>
+```
+
+Checklist 贴回失败时仍应在报告前触发 telemetry，将 `--success` 改为
+`false`，并追加 `--error-code step3_checklist_failed --failure-stage checklist`。
+Telemetry 失败不得改变 Checklist 流程的主结果。`pipeline notify` 的独立操作 telemetry 按 Step 4 章节执行。
 
 ### 本步骤完成标志
 
@@ -1347,6 +1406,26 @@ python3 pipeline_config.py remove-project --name "D01"
 
 触发 `pipeline notify` 或 `飞书通知` 时，仅执行本步骤。通过 `AskUserQuestion` 或等价交互能力收集缺少的 CR 信息。
 
+最终报告输出前必须触发单步 telemetry：
+
+```bash
+python3 <skill_dir>/scripts/telemetry_client.py \
+  --background \
+  --event-type pipeline_done \
+  --mode single_step \
+  --entry-mode notify \
+  --steps notify \
+  --is-full-pipeline false \
+  --agent <agent> \
+  --success true \
+  --duration-s <耗时秒数> \
+  --repo-count <CR数量>
+```
+
+飞书通知失败时仍应在报告前触发 telemetry，将 `--success` 改为 `false`，
+并追加 `--error-code step4_notify_failed --failure-stage notify`。Telemetry
+失败不得改变飞书通知流程的主结果。
+
 ### 本步骤完成标志
 
 - 飞书 API 返回成功（`code: 0`）
@@ -1475,6 +1554,36 @@ python3 <skill_dir>/scripts/telemetry_client.py \
 `review`、`checklist` 或 `notify`。独立操作使用 `--mode single_step`，
 并用 `--entry-mode` 与 `--steps` 记录真实入口和执行步骤；多步但未完整执行四步时使用 `--mode partial_pipeline`。
 
+#### 独立操作 telemetry 强制收尾
+
+每个独立操作在最终报告输出前都必须触发一次 telemetry。不得因为没有 full pipeline run context 而跳过；单步上报不需要 `--run-id`，直接以 `single_step` 事件记录本次独立操作。完整流水线中不得套用独立操作 telemetry 模板；完整流水线只在最终报告输出前发送一次 `full_pipeline` 事件。
+
+| 独立操作 | `entry_mode` | `steps` | 失败 `error-code` | `failure-stage` |
+|---|---|---|---|---|
+| `pipeline submit` / `gerrit submit` | `submit` | `submit` | `step1_submit_failed` | `submit` |
+| `pipeline review` | `review` | `review` | `step2_review_failed` | `review` |
+| `pipeline checklist` | `checklist` | `checklist` | `step3_checklist_failed` | `checklist` |
+| `pipeline notify` / `飞书通知` | `notify` | `notify` | `step4_notify_failed` | `notify` |
+
+统一模板：
+
+```bash
+python3 <skill_dir>/scripts/telemetry_client.py \
+  --background \
+  --event-type pipeline_done \
+  --mode single_step \
+  --entry-mode <submit|review|checklist|notify> \
+  --steps <submit|review|checklist|notify> \
+  --is-full-pipeline false \
+  --agent <agent> \
+  --success <true|false> \
+  --duration-s <耗时秒数> \
+  --repo-count <仓库或CR数量>
+```
+
+失败时在统一模板后追加 `--error-code <稳定错误码>` 和 `--failure-stage <阶段>`。
+Telemetry 发送失败只进入客户端本地队列，不改变独立操作的成功/失败结论。
+
 ### 本地队列
 
 当网关不可达、超时或返回非 2xx 时，当前事件写入本地队列：
@@ -1596,7 +1705,7 @@ python3 -m py_compile \
 
 mkdir -p release
 find release -mindepth 1 -maxdepth 1 -type f -delete
-zip -q release/gerrit-pipeline-v2.0.1.zip \
+zip -q release/gerrit-pipeline-v2.0.2.zip \
   gerrit-pipeline/README.md \
   gerrit-pipeline/SKILL.md \
   gerrit-pipeline/skill.json \
@@ -1609,7 +1718,7 @@ zip -q release/gerrit-pipeline-v2.0.1.zip \
   gerrit-pipeline/scripts/telemetry_client.py \
   gerrit-pipeline/scripts/telemetry_defaults.json
 
-zip -q release/telemetry-gateway-v2.0.1.zip \
+zip -q release/telemetry-gateway-v2.0.2.zip \
   telemetry-gateway/README.md \
   telemetry-gateway/.env.example \
   telemetry-gateway/app.py \
@@ -1620,18 +1729,18 @@ zip -q release/telemetry-gateway-v2.0.1.zip \
   telemetry-gateway/scripts/stop.sh \
   telemetry-gateway/systemd/telemetry-gateway.service
 
-unzip -l release/gerrit-pipeline-v2.0.1.zip
-unzip -l release/gerrit-pipeline-v2.0.1.zip | grep -F "gerrit-pipeline/references/full-spec.md"
-unzip -l release/gerrit-pipeline-v2.0.1.zip | grep -F "gerrit-pipeline/scripts/telemetry_client.py"
-unzip -l release/gerrit-pipeline-v2.0.1.zip | grep -F "gerrit-pipeline/scripts/telemetry_defaults.json"
-unzip -l release/telemetry-gateway-v2.0.1.zip
-unzip -l release/telemetry-gateway-v2.0.1.zip | grep -F "telemetry-gateway/scripts/status.sh"
-unzip -l release/telemetry-gateway-v2.0.1.zip | grep -F "telemetry-gateway/scripts/restart.sh"
-sha256sum release/gerrit-pipeline-v2.0.1.zip release/telemetry-gateway-v2.0.1.zip
+unzip -l release/gerrit-pipeline-v2.0.2.zip
+unzip -l release/gerrit-pipeline-v2.0.2.zip | grep -F "gerrit-pipeline/references/full-spec.md"
+unzip -l release/gerrit-pipeline-v2.0.2.zip | grep -F "gerrit-pipeline/scripts/telemetry_client.py"
+unzip -l release/gerrit-pipeline-v2.0.2.zip | grep -F "gerrit-pipeline/scripts/telemetry_defaults.json"
+unzip -l release/telemetry-gateway-v2.0.2.zip
+unzip -l release/telemetry-gateway-v2.0.2.zip | grep -F "telemetry-gateway/scripts/status.sh"
+unzip -l release/telemetry-gateway-v2.0.2.zip | grep -F "telemetry-gateway/scripts/restart.sh"
+sha256sum release/gerrit-pipeline-v2.0.2.zip release/telemetry-gateway-v2.0.2.zip
 
 git status --short
 git add -A
-git commit -m "release: gerrit-pipeline v2.0.1"
+git commit -m "release: gerrit-pipeline v2.0.2"
 git push origin "$(git branch --show-current)"
 ```
 
@@ -1664,11 +1773,11 @@ tar -tzf "$TARBALL" | grep -F "scripts/telemetry_defaults.json"
 # 正式发布：wrapper 会依次执行 telemetry pre、SkillPack lint、publish、telemetry post
 bash ~/.openclaw/workspace/skills/skillpack-client/scripts/publish-with-telemetry.sh \
   gerrit-pipeline \
-  --changelog "gerrit-pipeline v2.0.1"
+  --changelog "gerrit-pipeline v2.0.2"
 
 git status --short
 git add -A
-git commit -m "release: gerrit-pipeline v2.0.1"
+git commit -m "release: gerrit-pipeline v2.0.2"
 git push origin "$(git branch --show-current)"
 ```
 
@@ -1677,6 +1786,12 @@ git push origin "$(git branch --show-current)"
 ---
 
 ## 版本历史
+
+### v2.0.2（2026/6/16）
+
+1. **独立操作 telemetry 收尾补强**：明确 `pipeline submit`、`pipeline review`、`pipeline checklist` 和 `pipeline notify` 每个单步完成前都必须发送 `single_step` 事件
+2. **重复上报边界明确**：完整流水线不得套用独立操作 telemetry 模板，只在最终报告输出前发送一次 `full_pipeline` 事件，避免全流程重复产生多个单步事件
+3. **低风险文档修复**：不改变 Gateway、遥测字段结构、签名 key 机制和主流程脚本行为
 
 ### v2.0.1（2026/6/15）
 

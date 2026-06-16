@@ -115,7 +115,7 @@ class TelemetryClientTest(unittest.TestCase):
         self.assertEqual(event["event_id"], "evt-test")
         self.assertEqual(event["schema_version"], "1.1")
         self.assertEqual(event["skill"], "gerrit-pipeline")
-        self.assertEqual(event["skill_version"], "2.0.1")
+        self.assertEqual(event["skill_version"], "2.0.2")
         self.assertEqual(event["success"], True)
         self.assertEqual(event["duration_s"], 123.0)
         self.assertEqual(event["repo_count"], 2)
@@ -255,7 +255,7 @@ class TelemetryClientTest(unittest.TestCase):
         self.assertFalse(user_config.exists())
         self.assertTrue(settings["enabled"])
         self.assertEqual(settings["url"], "http://10.70.55.96:18080")
-        self.assertEqual(settings["key_id"], "gerrit-pipeline-v2.0.1")
+        self.assertEqual(settings["key_id"], "gerrit-pipeline-v2.0.2")
         self.assertEqual(settings["timeout"], 2.0)
         self.assertTrue(settings["hmac_secret"])
 
@@ -308,7 +308,7 @@ class TelemetryClientTest(unittest.TestCase):
                 {
                     "enabled": True,
                     "url": "http://example",
-                    "key_id": "gerrit-pipeline-v2.0.1",
+                    "key_id": "gerrit-pipeline-v2.0.2",
                     "hmac_secret": "secret",
                     "timeout": 1,
                 }
@@ -353,7 +353,7 @@ class TelemetryClientTest(unittest.TestCase):
         self.addCleanup(server.shutdown)
         url = f"http://127.0.0.1:{server.server_address[1]}"
         os.environ["GERRIT_PIPELINE_TELEMETRY_URL"] = url
-        os.environ["GERRIT_PIPELINE_TELEMETRY_KEY_ID"] = "gerrit-pipeline-v2.0.1"
+        os.environ["GERRIT_PIPELINE_TELEMETRY_KEY_ID"] = "gerrit-pipeline-v2.0.2"
         os.environ["GERRIT_PIPELINE_TELEMETRY_HMAC_SECRET"] = "secret"
         os.environ["GERRIT_PIPELINE_TELEMETRY_INSTALL_ID"] = "install-2"
 
@@ -362,7 +362,7 @@ class TelemetryClientTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(CaptureHandler.captured["path"], "/telemetry/events")
         self.assertIsNone(CaptureHandler.captured["auth"])
-        self.assertEqual(CaptureHandler.captured["key_id"], "gerrit-pipeline-v2.0.1")
+        self.assertEqual(CaptureHandler.captured["key_id"], "gerrit-pipeline-v2.0.2")
         self.assertTrue(CaptureHandler.captured["timestamp"])
         self.assertTrue(CaptureHandler.captured["nonce"])
         self.assertEqual(len(CaptureHandler.captured["body_hash"]), 64)

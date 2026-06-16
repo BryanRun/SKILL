@@ -61,7 +61,7 @@ AGENT_ALIASES = {
 DEFAULT_TELEMETRY = {
     "enabled": True,
     "url": "http://10.70.55.96:18080",
-    "key_id": "gerrit-pipeline-v2.0.1",
+    "key_id": "gerrit-pipeline-v2.0.2",
     "timeout_seconds": 2,
 }
 

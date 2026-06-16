@@ -1,6 +1,6 @@
 # gerrit-pipeline — 使用说明
 
-**版本：v2.0.1**
+**版本：v2.0.2**
 
 gerrit-pipeline 是一个 Claude Code 优先、Agent Neutral 兼容的 Skill，为车联 AutoLink 团队提供 Gerrit 代码提交评审一站式自动化能力。Claude Code 中可获得最佳体验：斜杠命令、结构化确认、多选、Skill 调用都能直接串联；其他 Agent 只要支持读取 skill 文档、执行脚本、与用户确认/选择，也可以按同一流程执行。v1.9.0 起，原 Step 3（Checklist 确认）与原 Step 3.5（飞书通知前确认）合并为单一确认屏，在不降低安全红线的前提下减少交互弹窗。目标是减少重复操作、统一提交规范、加速 Code Review 闭环。
 
@@ -288,6 +288,7 @@ v2.0.0 起，gerrit-pipeline 默认启用内部运行指标上报。配置随 sk
 
 | 版本 | 日期 | 变更摘要 |
 |------|------|---------|
+| v2.0.2 | 2026-06-16 | 1. 补强独立操作 telemetry 收尾规范，明确 `submit`、`review`、`checklist`、`notify` 单步执行也必须上报 `single_step` 事件<br>2. 明确完整流水线不得套用独立操作 telemetry 模板，避免全流程重复上报多个单步事件<br>3. 不改变 Gateway、遥测字段结构和主流程脚本行为 |
 | v2.0.1 | 2026-06-15 | 1. 补强遥测字段：新增 `entry_mode`、`steps`、`is_full_pipeline`、`run_id` 和 `agent_source`，准确记录入口、步骤顺序、是否全流程和运行时来源<br>2. 耗时字段统一为秒级 `duration_s` / `*_duration_s`，Gateway 兼容旧毫秒字段并自动派生到新列<br>3. 新增 Gateway 管理脚本和 run context 自动清理，便于管理员查看状态、重启服务和控制本地缓存 |
 | v2.0.0 | 2026-06-12 | 1. 默认启用内部运行指标上报，配置随 skill 分发，用户无需额外配置<br>2. 新增本地 spool 队列，网络不可达或后台进程拉起失败时保留事件，下次运行批量补发<br>3. 新增 Telemetry Gateway，接收端先异步入库再由后台 flush 到飞书多维表格，并按 `event_id` 做幂等保护 |
 | v1.9.7 | 2026-06-03 | 1. 补齐发布包中的 `references/full-spec.md`，避免用户更新后完整规范文档缺失<br>2. 流程 A 增加 zip 内容校验，流程 B 增加 SkillPack tarball 内容校验，避免后续发版再次遗漏完整规范<br>3. 不改变用户配置、主流程行为和既有升级路径 |

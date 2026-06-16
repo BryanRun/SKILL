@@ -31,7 +31,7 @@ Edit `.env`:
 
 ```bash
 TELEMETRY_ADMIN_TOKEN=<admin-token>
-TELEMETRY_HMAC_KEYS={"gerrit-pipeline-v2.0.1":"<hmac-secret>"}
+TELEMETRY_HMAC_KEYS={"gerrit-pipeline-v2.0.2":"<hmac-secret>"}
 TELEMETRY_REVOKED_KEY_IDS=
 FEISHU_APP_ID=<feishu-app-id>
 FEISHU_APP_SECRET=<feishu-app-secret>
@@ -85,11 +85,11 @@ that maps only the changed event keys to Bitable field names. The map is merged
 over the default field map. If a mapped field does not exist in the Bitable
 table yet, the Gateway skips that field instead of failing the whole flush.
 
-For gerrit-pipeline 2.0.1, `schema_version=1.1` uses seconds for all duration
-fields. The Gateway still accepts legacy `duration_ms` and `*_duration_ms`
-payloads from older clients and writes the derived values into the new `*_s`
-fields. Do not add new `*_ms` columns for the 2.0.1 telemetry table unless you
-need them only for historical migration.
+For gerrit-pipeline 2.0.1 and later, `schema_version=1.1` uses seconds for all
+duration fields. The Gateway still accepts legacy `duration_ms` and
+`*_duration_ms` payloads from older clients and writes the derived values into
+the new `*_s` fields. Do not add new `*_ms` columns for the 2.0.1+ telemetry
+table unless you need them only for historical migration.
 
 ## Start
 
@@ -261,7 +261,7 @@ Then restart the Gateway and submit a signed test event:
 
 ```bash
 GERRIT_PIPELINE_TELEMETRY_URL=http://10.70.55.96:18080 \
-GERRIT_PIPELINE_TELEMETRY_KEY_ID=gerrit-pipeline-v2.0.1 \
+GERRIT_PIPELINE_TELEMETRY_KEY_ID=gerrit-pipeline-v2.0.2 \
 GERRIT_PIPELINE_TELEMETRY_HMAC_SECRET=<same-hmac-secret> \
 GERRIT_PIPELINE_TELEMETRY_INSTALL_ID=manual-test \
 python3 ../gerrit-pipeline/scripts/telemetry_client.py \
@@ -285,7 +285,7 @@ Confirm `/metrics` and the Feishu Bitable record after the test event.
 `TELEMETRY_HMAC_KEYS` is for telemetry clients and should be versioned:
 
 ```bash
-TELEMETRY_HMAC_KEYS={"gerrit-pipeline-v2.0.0":"old-secret","gerrit-pipeline-v2.0.1":"new-secret"}
+TELEMETRY_HMAC_KEYS={"gerrit-pipeline-v2.0.0":"old-secret","gerrit-pipeline-v2.0.2":"new-secret"}
 ```
 
 When a key is leaked or a version should stop reporting, revoke it and restart:
@@ -361,7 +361,7 @@ curl -i "$GATEWAY_URL/readyz" \
 ```bash
 GATEWAY_URL=http://10.70.55.96:18080
 GERRIT_PIPELINE_TELEMETRY_URL="$GATEWAY_URL" \
-GERRIT_PIPELINE_TELEMETRY_KEY_ID=gerrit-pipeline-v2.0.1 \
+GERRIT_PIPELINE_TELEMETRY_KEY_ID=gerrit-pipeline-v2.0.2 \
 GERRIT_PIPELINE_TELEMETRY_HMAC_SECRET=<hmac-secret> \
 GERRIT_PIPELINE_TELEMETRY_INSTALL_ID=manual-test \
 python3 ../gerrit-pipeline/scripts/telemetry_client.py \

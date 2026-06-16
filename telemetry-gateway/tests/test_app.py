@@ -15,7 +15,7 @@ from pathlib import Path
 os.environ.update(
     {
         "TELEMETRY_ADMIN_TOKEN": "admin-token",
-        "TELEMETRY_HMAC_KEYS": '{"gerrit-pipeline-v2.0.1":"test-secret"}',
+        "TELEMETRY_HMAC_KEYS": '{"gerrit-pipeline-v2.0.2":"test-secret"}',
         "TELEMETRY_REVOKED_KEY_IDS": "",
         "TELEMETRY_DRY_RUN": "true",
         "TELEMETRY_FIELD_MAP": "",
@@ -63,7 +63,7 @@ class TelemetryGatewayTest(unittest.TestCase):
         app.Config.db_path = Path(self.tmpdir.name) / "telemetry.sqlite3"
         app.Config.dry_run = True
         app.Config.admin_token = "admin-token"
-        app.Config.hmac_keys = {"gerrit-pipeline-v2.0.1": "test-secret"}
+        app.Config.hmac_keys = {"gerrit-pipeline-v2.0.2": "test-secret"}
         app.Config.revoked_key_ids = set()
         app.Config.signature_max_age = 300
         app.Config.nonce_ttl = 600
@@ -125,7 +125,7 @@ class TelemetryGatewayTest(unittest.TestCase):
             hashlib.sha256,
         ).hexdigest()
         return {
-            "X-GP-Key-Id": "gerrit-pipeline-v2.0.1",
+            "X-GP-Key-Id": "gerrit-pipeline-v2.0.2",
             "X-GP-Timestamp": timestamp,
             "X-GP-Nonce": nonce,
             "X-GP-Body-SHA256": body_hash,
@@ -200,7 +200,7 @@ class TelemetryGatewayTest(unittest.TestCase):
                 "event_id": "evt-columns",
                 "skill": "gerrit-pipeline",
                 "failure_stage": "review",
-                "gateway_key_id": "gerrit-pipeline-v2.0.1",
+                "gateway_key_id": "gerrit-pipeline-v2.0.2",
             })
         finally:
             app.get_bitable_field_types = original_get_fields
@@ -306,7 +306,7 @@ class TelemetryGatewayTest(unittest.TestCase):
         self.assertEqual(status, 202)
         self.assertEqual(body["accepted"], 1)
         self.assertEqual(body["queued"], 1)
-        self.assertEqual(saved_payload["gateway_key_id"], "gerrit-pipeline-v2.0.1")
+        self.assertEqual(saved_payload["gateway_key_id"], "gerrit-pipeline-v2.0.2")
         self.assertEqual(metric_status, 200)
         self.assertEqual(metric_body["counts"], {"pending": 1})
         self.assertEqual(flush_status, 200)
@@ -345,7 +345,7 @@ class TelemetryGatewayTest(unittest.TestCase):
 
     def test_revoked_hmac_key_is_rejected(self):
         server = self._start_server()
-        app.Config.revoked_key_ids = {"gerrit-pipeline-v2.0.1"}
+        app.Config.revoked_key_ids = {"gerrit-pipeline-v2.0.2"}
         payload = {
             "event_id": "evt-revoked",
             "skill": "gerrit-pipeline",

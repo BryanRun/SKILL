@@ -230,7 +230,7 @@ def parse_hmac_keys() -> Dict[str, str]:
         for key, value in keys.items()
         if key and value
     }
-    key_id = os.environ.get("TELEMETRY_HMAC_KEY_ID", "gerrit-pipeline-v2.0.1")
+    key_id = os.environ.get("TELEMETRY_HMAC_KEY_ID", "gerrit-pipeline-v2.0.2")
     secret = os.environ.get("TELEMETRY_HMAC_SECRET", "")
     if key_id and secret:
         parsed.setdefault(key_id, secret)
@@ -811,7 +811,7 @@ def check_auth(handler: BaseHTTPRequestHandler, raw_body: bytes = b"") -> bool:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "TelemetryGateway/2.0.1"
+    server_version = "TelemetryGateway/2.0.2"
 
     def do_GET(self) -> None:
         path = urllib.parse.urlparse(self.path).path
