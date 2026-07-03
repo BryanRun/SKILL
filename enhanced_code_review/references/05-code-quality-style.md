@@ -131,9 +131,7 @@
 
 | 项 | 级别 |
 |---|---|
-| **commit message 缺 Jira 号**（CHYT1V / BAIC / KP31 / FL1 / FL2 / FL3 / T1V / D01 / CHYT12A / CHYMIFA） | **P0** → -1 |
-| **Jira 号为占位号**（如 CHYT1V-000 / CHYT1V-0001，数字部分全 0 或 0 开头） | **P0** → -1 |
-| **Jira 号为纯数字**（如 123456，无项目前缀） | **P0** → -1 |
+| **commit message 缺 Jira 号**（CHYT1V / BAIC / KP31 / AUDI / CL / T1V / D01） | **P0** → -1 |
 
 ### 4.2 车联（AutoLink）项目规范
 

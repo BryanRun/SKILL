@@ -1,5 +1,9 @@
 # 02 · 安全性（车载中间件适用范围）
 
+> **SELinux/MAC 强制访问控制**专项独立成篇，见 `references/18-selinux-policy.md`（v2.5.5）。
+> CR 改动命中 `*.te`/`*.cil`/`*_contexts`/`te_macros`/`/sepolicy/` 时由 `selinux_policy` 维度承接，
+> 本篇仅覆盖应用层安全（OWASP/CWE/输入校验/密钥/权限等）。
+
 ## 基础参考
 
 - [OWASP Top 10 - 2024](https://owasp.org/www-project-top-ten/)
@@ -52,7 +56,7 @@
 
 | 项 | 依据 | 级别 |
 |---|---|---|
-| 命令注入：字符串拼接到 `Runtime.exec()` / `ProcessBuilder` / `popen()` | CWE-78 | P0 |
+| 命令注入：字符串拼接到 `Runtime.exec`() / `ProcessBuilder` / `popen`() | CWE-78 | P0 |
 | 路径遍历：用户输入进入文件路径无白名单校验 | CWE-22 | P0 |
 | SQL 注入：字符串拼接 SQL（Room/ContentProvider） | OWASP A03:2021 | P0 |
 | Intent hijacking：隐式 Intent 未声明 package | Android Security | P1 |

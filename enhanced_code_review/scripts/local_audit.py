@@ -28,7 +28,7 @@ RULES = [
     (
         "R.TODO_NO_OWNER",
         re.compile(
-            r"//\s*TODO(?!.*(?:@|\bJira\b|\bCHYT1V\b|\bBAIC\b|\bKP31\b|\bFL[123]\b|\bT1V\b|\bD01\b|\bCHYT12A\b|\bCHYMIFA\b))"
+            r"//\s*TODO(?!.*(?:@|\bJira\b|\bCHER[A-Z0-9]*\b|\bCHYT1V\b|\bBAIC\b|\bKP31\b|\bAUDI\b|\bFL[123]\b|\bT1V\b|\bD01\b|\bCHYT12A\b|\bCHYMIFA\b))"
         ),
         "P3",
         "TODO 未关联 owner / Jira",

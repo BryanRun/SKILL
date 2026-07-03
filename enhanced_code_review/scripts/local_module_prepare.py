@@ -33,7 +33,7 @@
 import argparse
 import json
 import os
-import subprocess
+import subprocess as _sp
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -63,6 +63,16 @@ TEXT_EXT = {
     ".cmake",
     ".py",
     ".aidl",
+    ".te",     # v2.5.5 SELinux 策略
+    ".cil",    # v2.5.5 SELinux CIL（含 .compat.cil / .ignore.cil）
+    ".conf",   # v2.5.5 keys.conf 等
+}
+
+# v2.5.5：无后缀的 SELinux 上下文文件（按 basename 放行）
+_SELINUX_BASENAMES = {
+    "file_contexts", "property_contexts", "service_contexts", "seapp_contexts",
+    "hwservice_contexts", "vndservice_contexts", "genfs_contexts",
+    "mac_permissions.xml", "te_macros", "keys.conf",
 }
 
 
@@ -262,11 +272,11 @@ def _build_init_hint_for_missing(target_abs):
 
 def _run_git(args, cwd):
     # type: (List[str], str) -> Tuple[int, str]
-    # 兼容 Python 3.6.9：subprocess.run 不使用 capture_output / text（3.7+），改用经典写法。
-    p = subprocess.run(
+    # 兼容 Python 3.6.9：_sp.run 不使用 capture_output / text（3.7+），改用经典写法。
+    p = _sp.run(
         ["git", "-C", cwd] + list(args),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=_sp.PIPE,
+        stderr=_sp.PIPE,
         universal_newlines=True,
         errors="replace",
     )
@@ -307,7 +317,7 @@ def _collect_diff_paths(repo, module, base):
     for p in root.rglob("*"):
         if not p.is_file():
             continue
-        if p.suffix.lower() in TEXT_EXT or p.name in ("Android.bp", "Makefile"):
+        if p.suffix.lower() in TEXT_EXT or p.name in ("Android.bp", "Makefile") or p.name in _SELINUX_BASENAMES:
             try:
                 rel = p.relative_to(Path(repo))
                 files.append(str(rel).replace("\\", "/"))
@@ -345,7 +355,7 @@ def prepare(module, repo, base):
 
     for rel in paths:
         ext = Path(rel).suffix.lower()
-        if ext not in TEXT_EXT and Path(rel).name not in ("Android.bp", "Makefile"):
+        if ext not in TEXT_EXT and Path(rel).name not in ("Android.bp", "Makefile") and Path(rel).name not in _SELINUX_BASENAMES:
             continue
         diff_text = _read_diff_for_file(repo, rel, base)
         # 对新增行做规则扫描（简化：若整文件 diff 为空则读全文件扫）
@@ -417,6 +427,27 @@ def prepare(module, repo, base):
         },
         "note": "七维评审（含隐私合规 P0）与 LLM 输出格式遵循 references/08-llm-review-prompt.md；此处为本地模块上下文。",
     }
+
+
+def _attach_complexity(ctx):
+    # type: (dict) -> dict
+    """v2.3.0: 注入 ctx['complexity']，本地模块与 Gerrit 路径使用同一评级器。"""
+    try:
+        from complexity_assess import assess as _assess
+    except ImportError:
+        ctx["complexity"] = {
+            "level": "standard", "score": 5, "signals": ["assessor_unavailable"],
+            "reason": "complexity_assess 模块不可用，回退 Standard", "metrics": {},
+        }
+        return ctx
+    try:
+        ctx["complexity"] = _assess(ctx)
+    except Exception as e:
+        ctx["complexity"] = {
+            "level": "standard", "score": 5, "signals": ["assess_error"],
+            "reason": "评级器异常，回退 Standard: {}".format(e), "metrics": {},
+        }
+    return ctx
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +530,12 @@ def main():
         default=os.getcwd(),
         help="Git 仓库根（默认当前目录）。可用 'auto' 从 module 路径向上回溯定位最近 .git，自适应 git submodule / repo 工具管理的多仓库结构",
     )
+    ap.add_argument(
+        "--force-level",
+        choices=["lite", "standard", "deep"],
+        default=None,
+        help="v2.3.0: 强制指定复杂度档位，覆盖评级器判断",
+    )
     args = ap.parse_args()
 
     repo_root, module_rel, topology = _resolve_repo_and_module(args.repo, args.module)
@@ -529,6 +566,33 @@ def main():
 
     ctx = prepare(module_rel, str(repo_root), args.base)
     ctx["topology"] = topology
+
+    # v2.3.0: 注入复杂度评级
+    ctx = _attach_complexity(ctx)
+    if args.force_level and isinstance(ctx.get("complexity"), dict):
+        orig = ctx["complexity"].get("level")
+        ctx["complexity"]["level"] = args.force_level
+        ctx["complexity"]["signals"] = list(ctx["complexity"].get("signals") or []) + [
+            "force_level_override(from={})".format(orig)
+        ]
+        ctx["complexity"]["reason"] = (
+            "[--force-level] 用户强制指定为 {} (评级器原判 {})".format(args.force_level, orig)
+        )
+    # stderr banner
+    comp = ctx.get("complexity") or {}
+    lvl = comp.get("level", "standard")
+    icon = {"lite": "G", "standard": "Y", "deep": "R"}.get(lvl, "?")
+    print(
+        "\n[{}] 复杂度档位：{}\n   原因：{}\n   信号：{}\n   指标：{}\n"
+        "   -> 使用 prompt 模板：references/08-llm-review-prompt{}.md\n".format(
+            icon, lvl.upper(),
+            comp.get("reason", ""),
+            comp.get("signals", []),
+            comp.get("metrics", {}),
+            "-lite" if lvl == "lite" else ("-deep" if lvl == "deep" else ""),
+        ),
+        file=sys.stderr,
+    )
 
     js = json.dumps(ctx, ensure_ascii=False, indent=2)
     if args.output:

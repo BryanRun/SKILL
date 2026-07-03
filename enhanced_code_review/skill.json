@@ -1,0 +1,9 @@
+{
+  "name": "enhanced_code_review",
+  "version": "2.5.5",
+  "description": "增强版代码评审 v2.5.5：新增第 9 维『SELinux 策略专项』（上下文门控，仅当 CR 改动命中 *.te/*.cil/*_contexts/te_macros/sepolicy 路径时开启，references/18-selinux-policy.md，14 条规则 SEL-PERM/WILD/WX/NEVERALLOW=P0…SEL-NAME=P3，安全红线不设 P2/P3 上限），融合 AOSP SELinux 规范 + CDD §9.7 + 工程 SELinux 平台化指导文档；JIRA_RE 新增 CHER 奇瑞前缀（CHER-/CHERY- 等）并同步进 gerrit_audit/local_audit。完整保留 v2.5.4 stale-revision 修复 + 回帖模板强约束 + 闭环增强 CL-1~CL-6 + BUILD-FAIL-1 红线 + 平台化设计共识 P2/P3 + Reply-Aware 增量评审 + 复杂度自适应 + Cherry-pick 智能复用 + 本地模块评审 + 隐私合规三重门控 + 严重度↔分数硬门禁 + Python 3.6.9 兼容。触发：review <模块路径>、review CR <编号>、gerrit inbox。",
+  "platform": [
+    "claude-code",
+    "codex"
+  ]
+}

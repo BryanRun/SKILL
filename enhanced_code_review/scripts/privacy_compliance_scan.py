@@ -12,17 +12,13 @@
   * cs_po：对齐的产品需求号
   * severity_suggested：P0 / P1（LLM 最终定级以 08 为准）
 
-与 gerrit_audit / local_audit 的关系：
+与 gerrit_audit 的关系：
 - gerrit_audit.py 调用 `scan_diff_lines(added_lines_by_file)` → 产出 CR 粒度的候选
-- local_audit.py / local_module_prepare.py 调用 `scan_file(path, lines)` → 产出全文件候选
 - 两者都把候选注入 LLM user prompt 的 `privacy_candidates_json` 占位符。
 
 用法（CLI，便于单测）：
   python3 privacy_compliance_scan.py <path/to/file.java>
   python3 privacy_compliance_scan.py --diff CR_NUMBER   # 需要 Gerrit 凭据
-
-兼容性：本模块不使用 PEP 563 / PEP 585 / PEP 604，且不依赖标准库 dataclasses（3.7+），
-       可在 Python 3.6.9+ 直接运行（见 SKILL.md「运行时要求」）。
 """
 
 import argparse
@@ -30,14 +26,14 @@ import json
 import os
 import re
 import sys
-from typing import Dict, Iterable, List, Optional, Pattern, Tuple
+from typing import Iterable, List, Optional, Pattern, Tuple, Dict
 
 # ---------------------------------------------------------------------------
 # 门控 A · 敏感数据清单（来自《附录-个人信息定义》POXGWm）
 # ---------------------------------------------------------------------------
 # 每项：(id, 正则, 说明, 敏感个人信息标记（源表 √）, 默认建议级别)
 # 规则："特别敏感" 默认 P0，一般个人信息默认 P1（仅在与 sink 共现时）
-GATE_A = [  # type: List[Tuple[str, Pattern, str, bool, str]]
+GATE_A: List[Tuple[str, Pattern, str, bool, str]] = [
     # 生物识别（源表 √）
     ("A.BIO_FACE",
      re.compile(r"\b(face[_-]?feature|faceVector|face_data|faceEmbedding|facialTemplate)\b", re.I),
@@ -113,7 +109,7 @@ GATE_A = [  # type: List[Tuple[str, Pattern, str, bool, str]]
 # ---------------------------------------------------------------------------
 # 门控 B · 高风险 sink 清单
 # ---------------------------------------------------------------------------
-GATE_B = [  # type: List[Tuple[str, Pattern, str, str]]
+GATE_B: List[Tuple[str, Pattern, str, str]] = [
     # 明文网络（CS-PO-017）
     ("B.NET_HTTP",
      re.compile(r'"http://[^"]*"'),
@@ -191,40 +187,11 @@ DEFAULT_WINDOW = 8
 
 
 class Candidate(object):
-    """门控 A + B 共现候选；为兼容 Python 3.6.9 不使用 ``@dataclass``。"""
+    """A+B 共现候选；仅用 typing 注解，不依赖 dataclasses（兼容 Python 3.6）。"""
 
-    __slots__ = (
-        "path",
-        "gate_a_line",
-        "gate_b_line",
-        "gate_a_id",
-        "gate_a_desc",
-        "gate_a_sensitive",
-        "gate_b_id",
-        "gate_b_desc",
-        "gate_b_snippet",
-        "gate_a_snippet",
-        "cs_po",
-        "severity_suggested",
-        "rule",
-    )
-
-    def __init__(
-        self,
-        path,
-        gate_a_line,
-        gate_b_line,
-        gate_a_id,
-        gate_a_desc,
-        gate_a_sensitive,
-        gate_b_id,
-        gate_b_desc,
-        gate_b_snippet,
-        gate_a_snippet,
-        cs_po,
-        severity_suggested,
-        rule="PC.CANDIDATE",
-    ):
+    def __init__(self, path, gate_a_line, gate_b_line, gate_a_id, gate_a_desc,
+                 gate_a_sensitive, gate_b_id, gate_b_desc, gate_b_snippet,
+                 gate_a_snippet, cs_po, severity_suggested, rule="PC.CANDIDATE"):
         self.path = path
         self.gate_a_line = gate_a_line
         self.gate_b_line = gate_b_line
@@ -239,8 +206,7 @@ class Candidate(object):
         self.severity_suggested = severity_suggested
         self.rule = rule
 
-    def to_dict(self):
-        # type: () -> dict
+    def to_dict(self) -> dict:
         return {
             "rule": self.rule,
             "path": self.path,
@@ -264,11 +230,10 @@ def _path_should_drop(path: str) -> bool:
     return any(h in p for h in DROP_PATH_HINTS)
 
 
-def _scan_gates(lines):
-    # type: (List[str]) -> Tuple[List[Tuple[int, str, str]], List[Tuple[int, str, str]]]
+def _scan_gates(lines: List[str]) -> Tuple[List[Tuple[int, str, str]], List[Tuple[int, str, str]]]:
     """返回 (a_hits, b_hits), 每条 = (line_no_1based, hit_id, snippet)."""
-    a_hits = []  # type: List[Tuple[int, str, str]]
-    b_hits = []  # type: List[Tuple[int, str, str]]
+    a_hits: List[Tuple[int, str, str]] = []
+    b_hits: List[Tuple[int, str, str]] = []
     for i, raw in enumerate(lines, start=1):
         # 注释行降权：命中但不作为 A/B 证据
         if DROP_LINE_COMMENT.match(raw):
@@ -288,16 +253,21 @@ def _scan_gates(lines):
     return a_hits, b_hits
 
 
-def _pair(path, lines, a_hits, b_hits, window):
-    # type: (str, List[str], List[Tuple[int, str, str]], List[Tuple[int, str, str]], int) -> List[Candidate]
+def _pair(
+    path: str,
+    lines: List[str],
+    a_hits: List[Tuple[int, str, str]],
+    b_hits: List[Tuple[int, str, str]],
+    window: int,
+) -> List[Candidate]:
     """A × B 共现配对；同一 A 与同一 B 只报一次；距离优先近的。"""
     # 建索引：gid -> meta
     a_meta = {gid: (desc, sens, lvl) for gid, _pat, desc, sens, lvl in GATE_A}
     b_meta = {gid: (desc, cs) for gid, _pat, desc, cs in GATE_B}
 
-    cands = []  # type: List[Candidate]
+    cands: List[Candidate] = []
     # 同一 (gate_a_id, gate_b_id) 每文件仅保留距离最近的一条，其余压制为噪声
-    best_by_pair = {}  # type: Dict[Tuple[str, str], Candidate]
+    best_by_pair: Dict[Tuple[str, str], Candidate] = {}
 
     for (la, aid, asnip) in a_hits:
         for (lb, bid, bsnip) in b_hits:
@@ -336,8 +306,7 @@ def _pair(path, lines, a_hits, b_hits, window):
     return cands
 
 
-def scan_file(path, lines, window=DEFAULT_WINDOW):
-    # type: (str, List[str], int) -> dict
+def scan_file(path: str, lines: List[str], window: int = DEFAULT_WINDOW) -> dict:
     """扫描单文件（全量）。返回 { path, candidates:[...], dropped_reason? }。"""
     if _path_should_drop(path):
         return {"path": path, "candidates": [], "dropped_reason": "test/mock/doc path"}
@@ -346,8 +315,11 @@ def scan_file(path, lines, window=DEFAULT_WINDOW):
     return {"path": path, "candidates": [c.to_dict() for c in cands]}
 
 
-def scan_diff_added(added_by_file, context_by_file=None, window=DEFAULT_WINDOW):
-    # type: (Dict[str, List[Tuple[int, str]]], Optional[Dict[str, List[str]]], int) -> List[dict]
+def scan_diff_added(
+    added_by_file: Dict[str, List[Tuple[int, str]]],
+    context_by_file: Optional[Dict[str, List[str]]] = None,
+    window: int = DEFAULT_WINDOW,
+) -> List[dict]:
     """扫 CR 粒度：
     - `added_by_file[path]` = [(new_line_no, text), ...]  仅新增行
     - `context_by_file[path]` = 完整新侧文件行数组（用于 A/B 跨行共现）
@@ -355,7 +327,7 @@ def scan_diff_added(added_by_file, context_by_file=None, window=DEFAULT_WINDOW):
     策略：以 added 行为锚点（即至少有一侧证据出现在新增行），否则不列入
           （避免把完全未改动的既存问题扫出来刷屏）。
     """
-    out = []  # type: List[dict]
+    out: List[dict] = []
     for path, added in added_by_file.items():
         if _path_should_drop(path):
             out.append({"path": path, "candidates": [], "dropped_reason": "test/mock/doc path"})
@@ -396,16 +368,16 @@ def _cli():
         d = get_cr_detail(args.cr)
         cur = d.get("current_revision")
         files = d["revisions"][cur].get("files") or {}
-        added_by_file = {}     # type: Dict[str, List[Tuple[int, str]]]
-        context_by_file = {}   # type: Dict[str, List[str]]
+        added_by_file: Dict[str, List[Tuple[int, str]]] = {}
+        context_by_file: Dict[str, List[str]] = {}
         for fn, _meta in files.items():
             if fn == "/COMMIT_MSG":
                 continue
             dd = get_file_diff(args.cr, cur, fn)
             if not isinstance(dd, dict):
                 continue
-            added = []  # type: List[Tuple[int, str]]
-            full = []   # type: List[str]
+            added: List[Tuple[int, str]] = []
+            full: List[str] = []
             for old_ln, new_ln, kind, text in iter_diff_lines(dd):
                 if kind in ("add", "ctx"):
                     # 无完整 new side 时用 ctx+add 拼接近似全文
