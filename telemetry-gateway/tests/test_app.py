@@ -15,7 +15,7 @@ from pathlib import Path
 os.environ.update(
     {
         "TELEMETRY_ADMIN_TOKEN": "admin-token",
-        "TELEMETRY_HMAC_KEYS": '{"gerrit-pipeline-v2.0.3":"test-secret"}',
+        "TELEMETRY_HMAC_KEYS": '{"gerrit-pipeline-v2.0.2":"old-test-secret","gerrit-pipeline-v2.0.3":"test-secret"}',
         "TELEMETRY_REVOKED_KEY_IDS": "",
         "TELEMETRY_DRY_RUN": "true",
         "TELEMETRY_FIELD_MAP": "",
@@ -63,7 +63,10 @@ class TelemetryGatewayTest(unittest.TestCase):
         app.Config.db_path = Path(self.tmpdir.name) / "telemetry.sqlite3"
         app.Config.dry_run = True
         app.Config.admin_token = "admin-token"
-        app.Config.hmac_keys = {"gerrit-pipeline-v2.0.3": "test-secret"}
+        app.Config.hmac_keys = {
+            "gerrit-pipeline-v2.0.2": "old-test-secret",
+            "gerrit-pipeline-v2.0.3": "test-secret",
+        }
         app.Config.revoked_key_ids = set()
         app.Config.signature_max_age = 300
         app.Config.nonce_ttl = 600
@@ -108,7 +111,15 @@ class TelemetryGatewayTest(unittest.TestCase):
             body = exc.read().decode("utf-8")
             return exc.code, json.loads(body)
 
-    def _signed_headers(self, method, path, payload=None, nonce="nonce-test"):
+    def _signed_headers(
+        self,
+        method,
+        path,
+        payload=None,
+        nonce="nonce-test",
+        key_id="gerrit-pipeline-v2.0.3",
+        secret="test-secret",
+    ):
         raw = b"" if payload is None else json.dumps(payload).encode("utf-8")
         body_hash = hashlib.sha256(raw).hexdigest()
         timestamp = app.utc_now()
@@ -120,12 +131,12 @@ class TelemetryGatewayTest(unittest.TestCase):
             body_hash,
         )
         signature = hmac.new(
-            b"test-secret",
+            secret.encode("utf-8"),
             canonical.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
         return {
-            "X-GP-Key-Id": "gerrit-pipeline-v2.0.3",
+            "X-GP-Key-Id": key_id,
             "X-GP-Timestamp": timestamp,
             "X-GP-Nonce": nonce,
             "X-GP-Body-SHA256": body_hash,
@@ -312,6 +323,41 @@ class TelemetryGatewayTest(unittest.TestCase):
         self.assertEqual(flush_status, 200)
         self.assertEqual(flush_body["flush"], {"selected": 1, "sent": 1, "failed": 0})
         self.assertEqual(flush_body["counts"], {"sent": 1})
+
+    def test_legacy_hmac_key_is_accepted_during_rotation(self):
+        server = self._start_server()
+        payload = {
+            "event_id": "evt-legacy-key",
+            "skill": "gerrit-pipeline",
+            "skill_version": "2.0.2",
+            "success": True,
+            "duration_s": 123.0,
+        }
+
+        status, body = self._json_request(
+            server,
+            "POST",
+            "/telemetry/events",
+            payload,
+            self._signed_headers(
+                "POST",
+                "/telemetry/events",
+                payload,
+                nonce="nonce-legacy-key",
+                key_id="gerrit-pipeline-v2.0.2",
+                secret="old-test-secret",
+            ),
+        )
+        with app.db_connect() as conn:
+            row = conn.execute(
+                "SELECT payload FROM telemetry_events WHERE event_id = ?",
+                ("evt-legacy-key",),
+            ).fetchone()
+        saved_payload = json.loads(row["payload"])
+
+        self.assertEqual(status, 202)
+        self.assertEqual(body["accepted"], 1)
+        self.assertEqual(saved_payload["gateway_key_id"], "gerrit-pipeline-v2.0.2")
 
     def test_hmac_nonce_replay_is_rejected(self):
         server = self._start_server()

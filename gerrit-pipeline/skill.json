@@ -75,7 +75,7 @@
     }
   ],
   "changelog": [
-    "v2.0.3: 新增 commit_msg_guard.py 与 base_branch_guard.py，在 push 前强制校验 commit message、清理 Cursor 等运行时 trailer，并确认 HEAD 基于最新 autolink/<目标分支>；同步轮换 telemetry HMAC key 到 gerrit-pipeline-v2.0.3 并收紧 Gateway 鉴权边界。",
+    "v2.0.3: 新增 commit_msg_guard.py 与 base_branch_guard.py，在 push 前强制校验 commit message、清理 Cursor 等运行时 trailer，并确认 HEAD 基于最新 autolink/<目标分支>；同步轮换 telemetry HMAC key 到 gerrit-pipeline-v2.0.3、收紧 Gateway 鉴权边界，并保留 v2.0.2 客户端兼容。",
     "v2.0.2: 补强独立操作 telemetry 收尾规范，明确 submit/review/checklist/notify 单步执行也必须上报 single_step 事件，并避免完整流水线重复套用单步模板。",
     "v2.0.1: 补强遥测字段口径，新增入口、步骤顺序、全流程标识、运行时来源、run_id 与秒级耗时字段，Gateway 同步支持旧毫秒字段兼容转换。",
     "v2.0.0: 默认启用内部运行指标上报，新增本地 spool 队列、后台批量补发、Telemetry Gateway 异步入库和 Feishu Bitable 幂等写入，用户无需额外配置。",
