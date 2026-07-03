@@ -1696,7 +1696,7 @@ zip -q release/gerrit-pipeline-v2.0.3.zip \
   gerrit-pipeline/scripts/telemetry_client.py \
   gerrit-pipeline/scripts/telemetry_defaults.json
 
-zip -q release/telemetry-gateway-v2.0.2.zip \
+zip -q release/telemetry-gateway-v2.0.3.zip \
   telemetry-gateway/README.md \
   telemetry-gateway/.env.example \
   telemetry-gateway/app.py \
@@ -1713,10 +1713,12 @@ unzip -l release/gerrit-pipeline-v2.0.3.zip | grep -F "gerrit-pipeline/scripts/b
 unzip -l release/gerrit-pipeline-v2.0.3.zip | grep -F "gerrit-pipeline/scripts/commit_msg_guard.py"
 unzip -l release/gerrit-pipeline-v2.0.3.zip | grep -F "gerrit-pipeline/scripts/telemetry_client.py"
 unzip -l release/gerrit-pipeline-v2.0.3.zip | grep -F "gerrit-pipeline/scripts/telemetry_defaults.json"
-unzip -l release/telemetry-gateway-v2.0.2.zip
-unzip -l release/telemetry-gateway-v2.0.2.zip | grep -F "telemetry-gateway/scripts/status.sh"
-unzip -l release/telemetry-gateway-v2.0.2.zip | grep -F "telemetry-gateway/scripts/restart.sh"
-sha256sum release/gerrit-pipeline-v2.0.3.zip release/telemetry-gateway-v2.0.2.zip
+unzip -p release/gerrit-pipeline-v2.0.3.zip gerrit-pipeline/scripts/telemetry_defaults.json | grep -F '"key_id": "gerrit-pipeline-v2.0.3"'
+unzip -l release/telemetry-gateway-v2.0.3.zip
+unzip -l release/telemetry-gateway-v2.0.3.zip | grep -F "telemetry-gateway/scripts/status.sh"
+unzip -l release/telemetry-gateway-v2.0.3.zip | grep -F "telemetry-gateway/scripts/restart.sh"
+unzip -p release/telemetry-gateway-v2.0.3.zip telemetry-gateway/app.py | grep -F 'TelemetryGateway/2.0.3'
+sha256sum release/gerrit-pipeline-v2.0.3.zip release/telemetry-gateway-v2.0.3.zip
 
 git status --short
 git add -A
@@ -1777,7 +1779,9 @@ git push origin "$(git branch --show-current)"
 2. **Cursor 归因 trailer 自动清理**：`sanitize-head` 在 commit 后、push 前删除 `Co-authored-by:`、`Signed-off-by:`、`Made-with: Cursor` 等已知禁止 trailer，执行 message-only amend 后重新校验
 3. **目标分支基线强制校验**：新增 `scripts/base_branch_guard.py`，push 前执行 `git fetch autolink {目标分支}` 并校验 `FETCH_HEAD` 是当前 `HEAD` 的祖先
 4. **落后目标分支阻塞**：单仓、多仓、amend、cherry-pick 在 push 前均必须确认 `HEAD` 基于最新 `autolink/{目标分支}`；不满足时中止流水线，提示用户 rebase/merge 后重试
-5. **发布清单补强**：飞书 zip 与 SkillPack tarball 预检均检查 `scripts/commit_msg_guard.py` 和 `scripts/base_branch_guard.py`，避免发布包遗漏强制校验能力
+5. **Telemetry key 轮换**：客户端默认 `key_id` 和内置 HMAC secret 轮换到 `gerrit-pipeline-v2.0.3`；Gateway 发布包升级到 `telemetry-gateway-v2.0.3`
+6. **Gateway 鉴权边界收紧**：`/telemetry/events` 仅接受 HMAC 签名请求，`TELEMETRY_ADMIN_TOKEN` 只用于 `/readyz`、`/metrics` 和 `/telemetry/flush`
+7. **发布清单补强**：飞书 zip 与 SkillPack tarball 预检均检查 `scripts/commit_msg_guard.py`、`scripts/base_branch_guard.py` 和 telemetry 默认 key，避免发布包遗漏强制校验能力
 
 ### v2.0.2（2026/6/16）
 

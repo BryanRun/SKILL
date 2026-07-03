@@ -230,7 +230,7 @@ def parse_hmac_keys() -> Dict[str, str]:
         for key, value in keys.items()
         if key and value
     }
-    key_id = os.environ.get("TELEMETRY_HMAC_KEY_ID", "gerrit-pipeline-v2.0.2")
+    key_id = os.environ.get("TELEMETRY_HMAC_KEY_ID", "gerrit-pipeline-v2.0.3")
     secret = os.environ.get("TELEMETRY_HMAC_SECRET", "")
     if key_id and secret:
         parsed.setdefault(key_id, secret)
@@ -804,14 +804,8 @@ def check_hmac_auth(handler: BaseHTTPRequestHandler, raw_body: bytes) -> bool:
     return True
 
 
-def check_auth(handler: BaseHTTPRequestHandler, raw_body: bytes = b"") -> bool:
-    if check_admin_auth(handler):
-        return True
-    return check_hmac_auth(handler, raw_body)
-
-
 class Handler(BaseHTTPRequestHandler):
-    server_version = "TelemetryGateway/2.0.2"
+    server_version = "TelemetryGateway/2.0.3"
 
     def do_GET(self) -> None:
         path = urllib.parse.urlparse(self.path).path
@@ -838,7 +832,7 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, status, body)
             return
         if path == "/metrics":
-            if not check_auth(self):
+            if not require_admin_auth(self):
                 return
             json_response(self, 200, {"ok": True, "counts": event_counts()})
             return
@@ -847,7 +841,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         path = urllib.parse.urlparse(self.path).path
         if path == "/telemetry/flush":
-            if not check_auth(self):
+            if not require_admin_auth(self):
                 return
             stats = flush_pending()
             json_response(self, 200, {"ok": True, "flush": stats, "counts": event_counts()})
@@ -867,7 +861,7 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, 413, {"ok": False, "error": "invalid_body_size"})
             return
         raw = self.rfile.read(content_length)
-        if not check_auth(self, raw):
+        if not check_hmac_auth(self, raw):
             return
         try:
             data = json.loads(raw.decode("utf-8"))
