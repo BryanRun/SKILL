@@ -7,7 +7,7 @@ A collection of Claude Code-first, agent-compatible skills for automotive middle
 | Skill | Description | Version |
 |-------|-------------|---------|
 | [enhanced_code_review](./enhanced_code_review/) | 6-dimension code review with Gerrit and local module support | 2.0.0 |
-| [gerrit-pipeline](./gerrit-pipeline/) | One-click pipeline: submit → review → checklist → Feishu notification | 2.0.2 |
+| [gerrit-pipeline](./gerrit-pipeline/) | One-click pipeline: submit → review → checklist → Feishu notification | 2.0.3 |
 | [gerrit-submit](./gerrit-submit/) | Gerrit commit message generation, push, amend, and cherry-pick | - |
 | [feishu-docs](./feishu-docs/) | Read, create, edit, and export Feishu (Lark) documents and whiteboards | - |
 

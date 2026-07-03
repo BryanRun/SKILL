@@ -115,7 +115,7 @@ class TelemetryClientTest(unittest.TestCase):
         self.assertEqual(event["event_id"], "evt-test")
         self.assertEqual(event["schema_version"], "1.1")
         self.assertEqual(event["skill"], "gerrit-pipeline")
-        self.assertEqual(event["skill_version"], "2.0.2")
+        self.assertEqual(event["skill_version"], "2.0.3")
         self.assertEqual(event["success"], True)
         self.assertEqual(event["duration_s"], 123.0)
         self.assertEqual(event["repo_count"], 2)

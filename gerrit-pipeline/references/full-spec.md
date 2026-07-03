@@ -266,68 +266,30 @@ echo "$topic_name" | grep -qE '^[A-Za-z0-9_-]+$' || echo "ERROR: Topic 名称包
 5. **其他必填字段**：确认【影响范围】【代码修改量】【提交项目/分支】【体现版本】存在
 6. **体现版本格式**：【体现版本】由执行 Agent 自动填入当日日期，格式固定为 `After YYYY/M/D`（如 `After 2026/4/30`），不接受其他格式
 7. **开发自测视频**（可选）：如用户选择添加，确认【开发自测视频】存在且内容为固定值
-8. **严格符合模板**：commit message body 只能包含模板中定义的字段，不得有任何模板外的多余行（如 Co-Authored-By、Signed-off-by 等）
+8. **严格符合模板**：commit message body 只能包含模板中定义的字段，不得有任何模板外的多余行（如 Co-authored-by、Signed-off-by 等）
 
-**校验脚本（供执行 Agent 内部调用）**：
+**强制校验脚本（供执行 Agent 内部调用）**：
 
 ```bash
-# 获取最新 commit message
-msg=$(git log -1 --format="%B")
+# 只校验当前 HEAD，不修改提交
+python3 <skill_dir>/scripts/commit_msg_guard.py lint
 
-# 检查标题格式（【类型】【JIRA-ID】概要描述）
-echo "$msg" | head -1 | grep -qE '^【(bug|change|feature)】【' || echo "ERROR: 标题格式不符"
-
-# 检查 JIRA-ID（通用 Jira Key 形态，需被【】包裹，不限制具体项目前缀）
-echo "$msg" | head -1 | grep -qE '【[A-Z][A-Z0-9]*-[0-9]+】' || echo "ERROR: 缺少 JIRA-ID、格式不符或未用【】包裹"
-
-# 检查【x/y】标识格式（如存在）
-title=$(echo "$msg" | head -1)
-if echo "$title" | grep -qE '【[0-9]+/[0-9]+】'; then
-  x=$(echo "$title" | grep -oE '【[0-9]+/[0-9]+】' | grep -oE '[0-9]+' | head -1)
-  y=$(echo "$title" | grep -oE '【[0-9]+/[0-9]+】' | grep -oE '[0-9]+' | tail -1)
-  [ "$x" -gt 0 ] && [ "$y" -gt 0 ] || echo "ERROR: 【x/y】中 x 和 y 必须为正整数"
-  [ "$x" -le "$y" ] || echo "ERROR: 【x/y】中 x($x) 不能大于 y($y)"
-fi
-
-# 检查必填字段存在性
-for field in "【原因分析】" "【解决方案】" "【自测用例】" "【自测方法】" "【影响范围】" "【代码修改量】" "【提交项目/分支】" "【体现版本】"; do
-  echo "$msg" | grep -q "$field" || echo "ERROR: 缺少 $field"
-done
-
-# 检查字段字数（最低 + 最高）
-check_field_length() {
-  local field="$1" min_len="$2" max_len="$3"
-  local content=$(echo "$msg" | grep "$field" | sed "s/$field//")
-  local len=${#content}
-  if [ "$min_len" -gt 0 ] && [ "$len" -lt "$min_len" ]; then
-    echo "ERROR: $field 内容不足 ${min_len} 字（当前 ${len} 字）"
-  fi
-  if [ "$len" -gt "$max_len" ]; then
-    echo "ERROR: $field 内容超过 ${max_len} 字（当前 ${len} 字），请简明扼要"
-  fi
-}
-check_field_length "【原因分析】" 8 50
-check_field_length "【解决方案】" 8 50
-check_field_length "【自测用例】" 20 50
-check_field_length "【自测方法】" 4 50
-check_field_length "【影响范围】" 8 50
-check_field_length "【代码修改量】" 0 50
-check_field_length "【提交项目/分支】" 0 50
-
-# 检查【体现版本】格式（必须为 After YYYY/M/D 格式，如 After 2026/4/30）
-version_date=$(echo "$msg" | grep "^【体现版本】" | sed 's/^【体现版本】//')
-if [ -n "$version_date" ]; then
-  echo "$version_date" | grep -qE '^After [0-9]{4}/[0-9]{1,2}/[0-9]{1,2}$' || echo "ERROR: 【体现版本】格式错误，必须为 After YYYY/M/D 格式（如 After 2026/4/30）"
-fi
-
-# 检查 body 中是否存在模板外的多余行（标题、空行、已知字段、Change-Id 行除外）
-allowed_fields="【原因分析】|【解决方案】|【自测用例】|【自测方法】|【影响范围】|【代码修改量】|【提交项目/分支】|【体现版本】|【开发自测视频】|Change-Id:"
-echo "$msg" | tail -n +2 | while IFS= read -r line; do
-  [ -z "$line" ] && continue
-  echo "$line" | grep -qE "^($allowed_fields)" && continue
-  echo "ERROR: commit message 中存在模板外的多余行: $line"
-done
+# 提交后、push 前必须使用：删除 Cursor 等运行时追加的已知归因 trailer，
+# message-only amend 后重新执行完整校验；退出码非 0 则不得 push
+python3 <skill_dir>/scripts/commit_msg_guard.py sanitize-head
 ```
+
+`sanitize-head` 只自动删除已知禁止 trailer：`Co-authored-by:`、`Signed-off-by:`、`Made-with: Cursor`。其他模板外行不自动猜测删除，必须由执行 Agent 按模板修正后重新运行本脚本。
+
+#### 目标分支基线校验
+
+在 commit message 校验通过后、`git push` 之前，必须确认当前 `HEAD` 已基于最新目标分支：
+
+```bash
+python3 <skill_dir>/scripts/base_branch_guard.py --branch {目标分支}
+```
+
+脚本会执行 `git fetch autolink {目标分支}`，再用 `git merge-base --is-ancestor FETCH_HEAD HEAD` 判断远端目标分支最新提交是否已包含在当前 `HEAD` 中。退出码非 0 表示当前提交落后或偏离 `autolink/{目标分支}`，必须中止流水线；执行 Agent 应提示用户先 rebase/merge 最新目标分支后重新触发，不得继续 push。
 
 ### 1.5 推送工作流
 
@@ -358,9 +320,10 @@ git push autolink HEAD:refs/for/al_chery-d01_dev2%r=reviewer1,r=reviewer2,topic=
 4. 执行提交前检查（编译 + 单元测试）
 5. `git add` 暂存变更文件
 6. `git commit` 提交（使用规范化的 commit message）
-7. **强制校验 commit message**（详见 1.6 节），校验���通过则自动修正并重试，最多 3 次，3 次仍不通过则中止流水线
-8. `git push autolink HEAD:refs/for/{目标分支}%r={reviewer1},r={reviewer2}`
-9. 输出 Gerrit Change 链接
+7. 执行 `python3 <skill_dir>/scripts/commit_msg_guard.py sanitize-head` 强制校验 commit message（详见 1.6 节）；校验不通过则自动修正并重试，最多 3 次，3 次仍不通过则中止流水线
+8. 执行 `python3 <skill_dir>/scripts/base_branch_guard.py --branch {目标分支}` 强制校验 `HEAD` 已基于最新 `autolink/{目标分支}`；校验失败则中止流水线，不得 push
+9. `git push autolink HEAD:refs/for/{目标分支}%r={reviewer1},r={reviewer2}`
+10. 输出 Gerrit Change 链接
 
 #### Amend 追加 Patchset
 
@@ -372,7 +335,11 @@ git push autolink HEAD:refs/for/al_chery-d01_dev2%r=reviewer1,r=reviewer2,topic=
 git add <files>
 # 3. amend 提交（保留原 Change-Id）
 git commit --amend
-# 4. 推送（Change-Id 不变，Gerrit 自动关联为新 patchset）
+# 4. 清理运行时自动追加的 forbidden trailer 并强制校验
+python3 <skill_dir>/scripts/commit_msg_guard.py sanitize-head
+# 5. 校验当前 HEAD 基于最新目标分支
+python3 <skill_dir>/scripts/base_branch_guard.py --branch {目标分支}
+# 6. 推送（Change-Id 不变，Gerrit 自动关联为新 patchset）
 git push autolink HEAD:refs/for/{目标分支}%r={reviewer1},r={reviewer2}
 ```
 
@@ -408,9 +375,13 @@ git cherry-pick {commit-hash}
 # 4. 如有冲突，解决后 git cherry-pick --continue
 # 5. 如用户选择了新 JIRA-ID，amend commit message 替换 JIRA-ID
 git commit --amend  # 仅在 JIRA-ID 变更时执行
-# 6. 推送到 Gerrit
+# 6. 清理运行时自动追加的 forbidden trailer 并强制校验
+python3 <skill_dir>/scripts/commit_msg_guard.py sanitize-head
+# 7. 校验当前 HEAD 基于最新目标分支
+python3 <skill_dir>/scripts/base_branch_guard.py --branch {目标分支}
+# 8. 推送到 Gerrit
 git push autolink HEAD:refs/for/{目标分支}%r={reviewer1},r={reviewer2}
-# 7. 切回原分支
+# 9. 切回原分支
 git checkout {原分支}
 ```
 
@@ -438,7 +409,7 @@ git checkout {原分支}
 ```
 git commit 完成
       ↓
-运行校验脚本（1.4 节中的全部校验项）
+运行 python3 <skill_dir>/scripts/commit_msg_guard.py sanitize-head
       ↓
   校验通过？ ──是──→ 继续 git push
       ↓ 否
@@ -448,7 +419,7 @@ git commit 完成
       ↓
 git commit --amend（仅修正 message，不改变代码）
       ↓
-重新运行校验脚本
+重新运行 commit_msg_guard.py sanitize-head
       ↓
 （循环，最多 3 次）
       ↓
@@ -474,7 +445,7 @@ git commit --amend（仅修正 message，不改变代码）
 | 11 | 【提交项目/分支】 | 存在且 ≤50 字 | 阻塞 |
 | 12 | 【体现版本】 | 存在且格式为 `After YYYY/M/D`（如 `After 2026/5/2`） | 阻塞 |
 | 13 | 【开发自测视频】 | 如存在，内容必须为固定值 | 阻塞 |
-| 14 | 无模板外多余行 | body 中不得有 Co-Authored-By、Signed-off-by 等模板外行（Change-Id 行除外） | 阻塞 |
+| 14 | 无模板外多余行 | body 中不得有 Co-authored-by、Signed-off-by 等模板外行（Change-Id 行除外） | 阻塞 |
 | 15 | 字段顺序 | body 各字段必须按模板定义的顺序排列 | 阻塞 |
 
 #### 自动修正规则
@@ -487,11 +458,12 @@ git commit --amend（仅修正 message，不改变代码）
 | 字段内容超过 50 字上限 | 精简该字段内容至 50 字以内 |
 | 缺少必填字段 | 根据 diff 和上下文补充缺失字段 |
 | 【体现版本】格式错误 | 替换为当日日期 `After YYYY/M/D` |
-| 存在模板外多余行 | 删除多余行（如 Co-Authored-By、Signed-off-by 等） |
+| 存在已知禁止 trailer | `commit_msg_guard.py sanitize-head` 自动删除 `Co-authored-by:`、`Signed-off-by:`、`Made-with: Cursor` 并 message-only amend |
+| 存在其他模板外多余行 | 执行 Agent 按模板重新生成 message；不得静默保留或 push |
 | 字段顺序错误 | 按模板定义的顺序重新排列 |
 | 标题与 body 之间缺少空行 | 插入空行 |
 
-修正完成后使用 `git commit --amend` 更新 commit message（仅修正 message 内容，不改变已暂存的代码变更），然后重新执行校验。
+修正完成后使用 `git commit --amend` 更新 commit message（仅修正 message 内容，不改变已暂存的代码变更），然后重新执行 `commit_msg_guard.py sanitize-head`。
 
 #### 重试限制
 
@@ -504,7 +476,7 @@ git commit --amend（仅修正 message，不改变代码）
 
 #### 校验通过标志
 
-校验脚本输出无任何 `ERROR` 行，即视为校验通过。校验通过后方可执行 `git push`。
+`commit_msg_guard.py sanitize-head` 退出码为 0 且输出 `commit message guard: OK`，即视为校验通过。校验通过后方可执行 `git push`。
 
 ### 1.7 交互式辅助流程
 
@@ -725,6 +697,7 @@ repo forall -c 'if [ -n "$(git status --porcelain)" ]; then echo "$(pwd)"; fi'
    - `git add` 暂存变更
    - `git commit`（使用对应的 commit message）
    - 本地校验 commit message 格式（§1.6.4 校验-修正-重试闭环照常执行）
+   - 执行 `python3 <skill_dir>/scripts/base_branch_guard.py --branch {目标分支}`，确认当前 `HEAD` 基于最新 `autolink/{目标分支}`
    - `git push autolink HEAD:refs/for/{目标分支}%r={reviewer1},r={reviewer2},topic={topic名称}`
    - 提取 CR 编号
 2. **最后一笔（【y/y】）最后 push**
@@ -750,8 +723,9 @@ repo forall -c 'if [ -n "$(git status --porcelain)" ]; then echo "$(pwd)"; fi'
 1. `git add` 暂存变更文件
 2. `git commit --amend`（保留原 Change-Id；如 JIRA-ID 变更则同步修改 commit message）
 3. 强制校验 commit message（1.6 节）
-4. `git push autolink HEAD:refs/for/{目标分支}%r={reviewer1},r={reviewer2}`
-5. 提取 CR 编号（从 push 输出中获取）
+4. 执行 `python3 <skill_dir>/scripts/base_branch_guard.py --branch {目标分支}`，确认当前 `HEAD` 基于最新 `autolink/{目标分支}`
+5. `git push autolink HEAD:refs/for/{目标分支}%r={reviewer1},r={reviewer2}`
+6. 提取 CR 编号（从 push 输出中获取）
 
 **注意**：
 - amend 必须保留原 commit message 中的 `Change-Id`，推送前确认未被改变
@@ -773,9 +747,9 @@ repo forall -c 'if [ -n "$(git status --porcelain)" ]; then echo "$(pwd)"; fi'
 
 | 操作 | 命令 |
 |------|------|
-| 推送新 Change | `git push autolink HEAD:refs/for/{branch}%r={r1},r={r2}` |
-| 推送关联提交（带 topic） | `git push autolink HEAD:refs/for/{branch}%r={r1},r={r2},topic={topic}` |
-| amend 后推送 | `git commit --amend && git push autolink HEAD:refs/for/{branch}%r={r1},r={r2}` |
+| 推送新 Change | `python3 <skill_dir>/scripts/base_branch_guard.py --branch {branch} && git push autolink HEAD:refs/for/{branch}%r={r1},r={r2}` |
+| 推送关联提交（带 topic） | `python3 <skill_dir>/scripts/base_branch_guard.py --branch {branch} && git push autolink HEAD:refs/for/{branch}%r={r1},r={r2},topic={topic}` |
+| amend 后推送 | `git commit --amend && python3 <skill_dir>/scripts/commit_msg_guard.py sanitize-head && python3 <skill_dir>/scripts/base_branch_guard.py --branch {branch} && git push autolink HEAD:refs/for/{branch}%r={r1},r={r2}` |
 | 查看 Gerrit Dashboard | 浏览器打开 `https://gerrit.auto-link.com.cn/dashboard/self` |
 | 查看 Change-Id | `git log -1 --format="%B" \| grep Change-Id` |
 | 检查 commit-msg hook | `ls -la .git/hooks/commit-msg` |
@@ -1697,6 +1671,8 @@ Run context 只用于跨 shell 记录本次流程的真实步骤和耗时，不�
 
 ```bash
 python3 -m py_compile \
+  gerrit-pipeline/scripts/base_branch_guard.py \
+  gerrit-pipeline/scripts/commit_msg_guard.py \
   gerrit-pipeline/scripts/feishu_notify.py \
   gerrit-pipeline/scripts/gerrit_post_checklist.py \
   gerrit-pipeline/scripts/gerrit_post_review.py \
@@ -1705,12 +1681,14 @@ python3 -m py_compile \
 
 mkdir -p release
 find release -mindepth 1 -maxdepth 1 -type f -delete
-zip -q release/gerrit-pipeline-v2.0.2.zip \
+zip -q release/gerrit-pipeline-v2.0.3.zip \
   gerrit-pipeline/README.md \
   gerrit-pipeline/SKILL.md \
   gerrit-pipeline/skill.json \
   gerrit-pipeline/.skillpackignore \
   gerrit-pipeline/references/full-spec.md \
+  gerrit-pipeline/scripts/base_branch_guard.py \
+  gerrit-pipeline/scripts/commit_msg_guard.py \
   gerrit-pipeline/scripts/pipeline_config.py \
   gerrit-pipeline/scripts/feishu_notify.py \
   gerrit-pipeline/scripts/gerrit_post_review.py \
@@ -1729,18 +1707,20 @@ zip -q release/telemetry-gateway-v2.0.2.zip \
   telemetry-gateway/scripts/stop.sh \
   telemetry-gateway/systemd/telemetry-gateway.service
 
-unzip -l release/gerrit-pipeline-v2.0.2.zip
-unzip -l release/gerrit-pipeline-v2.0.2.zip | grep -F "gerrit-pipeline/references/full-spec.md"
-unzip -l release/gerrit-pipeline-v2.0.2.zip | grep -F "gerrit-pipeline/scripts/telemetry_client.py"
-unzip -l release/gerrit-pipeline-v2.0.2.zip | grep -F "gerrit-pipeline/scripts/telemetry_defaults.json"
+unzip -l release/gerrit-pipeline-v2.0.3.zip
+unzip -l release/gerrit-pipeline-v2.0.3.zip | grep -F "gerrit-pipeline/references/full-spec.md"
+unzip -l release/gerrit-pipeline-v2.0.3.zip | grep -F "gerrit-pipeline/scripts/base_branch_guard.py"
+unzip -l release/gerrit-pipeline-v2.0.3.zip | grep -F "gerrit-pipeline/scripts/commit_msg_guard.py"
+unzip -l release/gerrit-pipeline-v2.0.3.zip | grep -F "gerrit-pipeline/scripts/telemetry_client.py"
+unzip -l release/gerrit-pipeline-v2.0.3.zip | grep -F "gerrit-pipeline/scripts/telemetry_defaults.json"
 unzip -l release/telemetry-gateway-v2.0.2.zip
 unzip -l release/telemetry-gateway-v2.0.2.zip | grep -F "telemetry-gateway/scripts/status.sh"
 unzip -l release/telemetry-gateway-v2.0.2.zip | grep -F "telemetry-gateway/scripts/restart.sh"
-sha256sum release/gerrit-pipeline-v2.0.2.zip release/telemetry-gateway-v2.0.2.zip
+sha256sum release/gerrit-pipeline-v2.0.3.zip release/telemetry-gateway-v2.0.2.zip
 
 git status --short
 git add -A
-git commit -m "release: gerrit-pipeline v2.0.2"
+git commit -m "release: gerrit-pipeline v2.0.3"
 git push origin "$(git branch --show-current)"
 ```
 
@@ -1752,6 +1732,8 @@ SkillPack 发布使用 `skill.json` 作为版本与元数据 SOT。当前发布�
 
 ```bash
 python3 -m py_compile \
+  gerrit-pipeline/scripts/base_branch_guard.py \
+  gerrit-pipeline/scripts/commit_msg_guard.py \
   gerrit-pipeline/scripts/feishu_notify.py \
   gerrit-pipeline/scripts/gerrit_post_checklist.py \
   gerrit-pipeline/scripts/gerrit_post_review.py \
@@ -1767,17 +1749,19 @@ TARBALL="$(bash ~/.openclaw/workspace/skills/skillpack-client/scripts/pack-skill
 
 # 发布包必须包含完整规范
 tar -tzf "$TARBALL" | grep -F "references/full-spec.md"
+tar -tzf "$TARBALL" | grep -F "scripts/base_branch_guard.py"
+tar -tzf "$TARBALL" | grep -F "scripts/commit_msg_guard.py"
 tar -tzf "$TARBALL" | grep -F "scripts/telemetry_client.py"
 tar -tzf "$TARBALL" | grep -F "scripts/telemetry_defaults.json"
 
 # 正式发布：wrapper 会依次执行 telemetry pre、SkillPack lint、publish、telemetry post
 bash ~/.openclaw/workspace/skills/skillpack-client/scripts/publish-with-telemetry.sh \
   gerrit-pipeline \
-  --changelog "gerrit-pipeline v2.0.2"
+  --changelog "gerrit-pipeline v2.0.3"
 
 git status --short
 git add -A
-git commit -m "release: gerrit-pipeline v2.0.2"
+git commit -m "release: gerrit-pipeline v2.0.3"
 git push origin "$(git branch --show-current)"
 ```
 
@@ -1786,6 +1770,14 @@ git push origin "$(git branch --show-current)"
 ---
 
 ## 版本历史
+
+### v2.0.3（2026/7/3）
+
+1. **Commit Message Guard 落地**：新增 `scripts/commit_msg_guard.py`，将 commit message 模板校验从文档片段升级为可执行脚本，并以退出码阻塞 push
+2. **Cursor 归因 trailer 自动清理**：`sanitize-head` 在 commit 后、push 前删除 `Co-authored-by:`、`Signed-off-by:`、`Made-with: Cursor` 等已知禁止 trailer，执行 message-only amend 后重新校验
+3. **目标分支基线强制校验**：新增 `scripts/base_branch_guard.py`，push 前执行 `git fetch autolink {目标分支}` 并校验 `FETCH_HEAD` 是当前 `HEAD` 的祖先
+4. **落后目标分支阻塞**：单仓、多仓、amend、cherry-pick 在 push 前均必须确认 `HEAD` 基于最新 `autolink/{目标分支}`；不满足时中止流水线，提示用户 rebase/merge 后重试
+5. **发布清单补强**：飞书 zip 与 SkillPack tarball 预检均检查 `scripts/commit_msg_guard.py` 和 `scripts/base_branch_guard.py`，避免发布包遗漏强制校验能力
 
 ### v2.0.2（2026/6/16）
 

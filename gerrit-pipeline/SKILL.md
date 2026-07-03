@@ -71,6 +71,8 @@ Claude Code 中优先使用 `/gerrit-pipeline`。Codex、Cursor、Her 或其他 
 6. 任一 Checklist 贴回失败时，不得发送飞书通知。
 7. 飞书通知 `--subject` 必须与 commit message 第一行完全一致。
 8. 多仓关联提交必须使用统一 topic，参与仓库由用户明确确认。
+9. commit message body 禁止任何模板外 trailer，包括 `Co-authored-by`、`Signed-off-by`、`Made-with: Cursor`；即使由 Cursor 等运行时自动追加，也必须在 push 前删除并重新校验。
+10. 所有 push 前必须确认当前 `HEAD` 已基于最新 `autolink/<目标分支>`；未基于最新目标分支时必须中止，让用户 rebase/merge 后重试。
 
 ## Step 1 提交范围判定
 
@@ -101,10 +103,12 @@ Claude Code 中优先使用 `/gerrit-pipeline`。Codex、Cursor、Her 或其他 
 ```bash
 git add <files>
 git commit
+python3 <skill_dir>/scripts/commit_msg_guard.py sanitize-head
+python3 <skill_dir>/scripts/base_branch_guard.py --branch <branch>
 git push autolink HEAD:refs/for/<branch>%r=<reviewer1>,r=<reviewer2>
 ```
 
-commit 后、push 前必须执行 commit message 校验；失败时最多修正并 amend 3 次。
+commit 后、push 前必须依次执行 `scripts/commit_msg_guard.py sanitize-head` 与 `scripts/base_branch_guard.py --branch <目标分支>`；任一失败则中止，不得 push。
 
 ## 路径 B：多仓库关联提交
 
@@ -113,6 +117,8 @@ commit 后、push 前必须执行 commit message 校验；失败时最多修正�
 每个仓库按顺序提交，并使用同一个 topic：
 
 ```bash
+python3 <skill_dir>/scripts/commit_msg_guard.py sanitize-head
+python3 <skill_dir>/scripts/base_branch_guard.py --branch <branch>
 git push autolink HEAD:refs/for/<branch>%r=<reviewer1>,r=<reviewer2>,topic=<topic>
 ```
 
@@ -123,6 +129,8 @@ git push autolink HEAD:refs/for/<branch>%r=<reviewer1>,r=<reviewer2>,topic=<topi
 Amend 流程用于已有 Change 追加 patchset，必须保留原 Change-Id。不得用普通 `git commit` 创建新 Change。
 
 Cherry-pick 流程必须确认目标分支和 JIRA-ID；如冲突，解决后继续 cherry-pick，再按规范 push 到 Gerrit。
+
+Amend / Cherry-pick 在 push 前同样必须执行 `scripts/commit_msg_guard.py sanitize-head` 和 `scripts/base_branch_guard.py --branch <目标分支>`，保留 `Change-Id` 并阻塞任何模板外 trailer 或落后目标分支的 HEAD。
 
 ## Step 2 代码评审
 
@@ -162,6 +170,8 @@ python3 scripts/feishu_notify.py \
 - `scripts/gerrit_post_review.py`：评审结论贴回
 - `scripts/gerrit_post_checklist.py`：Checklist 贴回
 - `scripts/feishu_notify.py`：飞书通知卡片
+- `scripts/commit_msg_guard.py`：commit message 强制校验与 Cursor 归因 trailer 清理
+- `scripts/base_branch_guard.py`：push 前确认 `HEAD` 基于最新 `autolink/<目标分支>`
 - `scripts/telemetry_client.py`：非阻塞执行遥测上报
 - `scripts/telemetry_defaults.json`：内部 telemetry 默认配置
 
