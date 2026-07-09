@@ -289,7 +289,7 @@ v2.0.0 起，gerrit-pipeline 默认启用内部运行指标上报。配置随 sk
 
 | 版本 | 日期 | 变更摘要 |
 |------|------|---------|
-| v2.0.3 | 2026-07-03 | 1. 新增 `scripts/commit_msg_guard.py`，在 commit 后、push 前强制校验 commit message 并清理 Cursor 等运行时追加的 forbidden trailer<br>2. 新增 `scripts/base_branch_guard.py`，push 前 fetch `autolink` 目标分支并校验 `HEAD` 基于最新 `autolink/<目标分支>`<br>3. 单仓、多仓、amend、cherry-pick 均在 push 前阻塞模板外 trailer 和落后目标分支的提交<br>4. Telemetry 默认 key 轮换到 `gerrit-pipeline-v2.0.3`，Gateway 管理接口与事件写入鉴权边界收紧，并通过双 key 配置兼容旧 `v2.0.2` 客户端<br>5. 发版清单补齐 commit message guard、base branch guard 与 Gateway v2.0.3 产物 |
+| v2.0.3 | 2026-07-03 | 1. 新增 `scripts/commit_msg_guard.py`，在 commit 后、push 前强制校验 commit message 并清理 Cursor 等运行时追加的 forbidden trailer<br>2. 新增 `scripts/base_branch_guard.py`，push 前 fetch `autolink` 目标分支并校验 `HEAD` 基于最新 `autolink/<目标分支>`<br>3. 单仓、多仓、amend、cherry-pick 均在 push 前阻塞模板外 trailer 和落后目标分支的提交<br>4. Telemetry 默认 key 轮换到 `gerrit-pipeline-v2.0.3`，Gateway 管理接口与事件写入鉴权边界收紧，并通过多 key 配置兼容全部 `v2.0.x` 客户端<br>5. 发版清单补齐 commit message guard、base branch guard 与 Gateway v2.0.3 产物 |
 | v2.0.2 | 2026-06-16 | 1. 补强独立操作 telemetry 收尾规范，明确 `submit`、`review`、`checklist`、`notify` 单步执行也必须上报 `single_step` 事件<br>2. 明确完整流水线不得套用独立操作 telemetry 模板，避免全流程重复上报多个单步事件<br>3. 不改变 Gateway、遥测字段结构和主流程脚本行为 |
 | v2.0.1 | 2026-06-15 | 1. 补强遥测字段：新增 `entry_mode`、`steps`、`is_full_pipeline`、`run_id` 和 `agent_source`，准确记录入口、步骤顺序、是否全流程和运行时来源<br>2. 耗时字段统一为秒级 `duration_s` / `*_duration_s`，Gateway 兼容旧毫秒字段并自动派生到新列<br>3. 新增 Gateway 管理脚本和 run context 自动清理，便于管理员查看状态、重启服务和控制本地缓存 |
 | v2.0.0 | 2026-06-12 | 1. 默认启用内部运行指标上报，配置随 skill 分发，用户无需额外配置<br>2. 新增本地 spool 队列，网络不可达或后台进程拉起失败时保留事件，下次运行批量补发<br>3. 新增 Telemetry Gateway，接收端先异步入库再由后台 flush 到飞书多维表格，并按 `event_id` 做幂等保护 |

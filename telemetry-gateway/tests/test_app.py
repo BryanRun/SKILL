@@ -15,7 +15,7 @@ from pathlib import Path
 os.environ.update(
     {
         "TELEMETRY_ADMIN_TOKEN": "admin-token",
-        "TELEMETRY_HMAC_KEYS": '{"gerrit-pipeline-v2.0.2":"old-test-secret","gerrit-pipeline-v2.0.3":"test-secret"}',
+        "TELEMETRY_HMAC_KEYS": '{"gerrit-pipeline-v2.0.0":"legacy-test-secret","gerrit-pipeline-v2.0.1":"legacy-test-secret","gerrit-pipeline-v2.0.2":"legacy-test-secret","gerrit-pipeline-v2.0.3":"test-secret"}',
         "TELEMETRY_REVOKED_KEY_IDS": "",
         "TELEMETRY_DRY_RUN": "true",
         "TELEMETRY_FIELD_MAP": "",
@@ -64,7 +64,9 @@ class TelemetryGatewayTest(unittest.TestCase):
         app.Config.dry_run = True
         app.Config.admin_token = "admin-token"
         app.Config.hmac_keys = {
-            "gerrit-pipeline-v2.0.2": "old-test-secret",
+            "gerrit-pipeline-v2.0.0": "legacy-test-secret",
+            "gerrit-pipeline-v2.0.1": "legacy-test-secret",
+            "gerrit-pipeline-v2.0.2": "legacy-test-secret",
             "gerrit-pipeline-v2.0.3": "test-secret",
         }
         app.Config.revoked_key_ids = set()
@@ -324,40 +326,50 @@ class TelemetryGatewayTest(unittest.TestCase):
         self.assertEqual(flush_body["flush"], {"selected": 1, "sent": 1, "failed": 0})
         self.assertEqual(flush_body["counts"], {"sent": 1})
 
-    def test_legacy_hmac_key_is_accepted_during_rotation(self):
+    def test_2_0_x_hmac_keys_are_accepted(self):
         server = self._start_server()
-        payload = {
-            "event_id": "evt-legacy-key",
-            "skill": "gerrit-pipeline",
-            "skill_version": "2.0.2",
-            "success": True,
-            "duration_s": 123.0,
-        }
+        cases = [
+            ("2.0.0", "duration_ms", 123000),
+            ("2.0.1", "duration_s", 123.0),
+            ("2.0.2", "duration_s", 123.0),
+            ("2.0.3", "duration_s", 123.0),
+        ]
 
-        status, body = self._json_request(
-            server,
-            "POST",
-            "/telemetry/events",
-            payload,
-            self._signed_headers(
+        for version, duration_key, duration_value in cases:
+            key_id = f"gerrit-pipeline-v{version}"
+            payload = {
+                "event_id": f"evt-key-{version}",
+                "skill": "gerrit-pipeline",
+                "skill_version": version,
+                "success": True,
+                duration_key: duration_value,
+            }
+            secret = "test-secret" if version == "2.0.3" else "legacy-test-secret"
+
+            status, body = self._json_request(
+                server,
                 "POST",
                 "/telemetry/events",
                 payload,
-                nonce="nonce-legacy-key",
-                key_id="gerrit-pipeline-v2.0.2",
-                secret="old-test-secret",
-            ),
-        )
-        with app.db_connect() as conn:
-            row = conn.execute(
-                "SELECT payload FROM telemetry_events WHERE event_id = ?",
-                ("evt-legacy-key",),
-            ).fetchone()
-        saved_payload = json.loads(row["payload"])
+                self._signed_headers(
+                    "POST",
+                    "/telemetry/events",
+                    payload,
+                    nonce=f"nonce-key-{version}",
+                    key_id=key_id,
+                    secret=secret,
+                ),
+            )
+            with app.db_connect() as conn:
+                row = conn.execute(
+                    "SELECT payload FROM telemetry_events WHERE event_id = ?",
+                    (f"evt-key-{version}",),
+                ).fetchone()
+            saved_payload = json.loads(row["payload"])
 
-        self.assertEqual(status, 202)
-        self.assertEqual(body["accepted"], 1)
-        self.assertEqual(saved_payload["gateway_key_id"], "gerrit-pipeline-v2.0.2")
+            self.assertEqual(status, 202)
+            self.assertEqual(body["accepted"], 1)
+            self.assertEqual(saved_payload["gateway_key_id"], key_id)
 
     def test_hmac_nonce_replay_is_rejected(self):
         server = self._start_server()
@@ -525,6 +537,30 @@ class TelemetryGatewayTest(unittest.TestCase):
 
         self.assertEqual(status, 401)
         self.assertEqual(body["error"], "unauthorized")
+
+    def test_version_requires_admin_token(self):
+        server = self._start_server()
+
+        status, body = self._json_request(server, "GET", "/version")
+
+        self.assertEqual(status, 401)
+        self.assertEqual(body["error"], "unauthorized")
+
+    def test_version_reports_running_gateway_version(self):
+        server = self._start_server()
+
+        status, body = self._json_request(
+            server,
+            "GET",
+            "/version",
+            headers={"Authorization": "Bearer admin-token"},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["service"], "telemetry-gateway")
+        self.assertEqual(body["version"], app.GATEWAY_VERSION)
+        self.assertEqual(body["server_version"], app.Handler.server_version)
 
     def test_readyz_reports_bitable_failure_as_json(self):
         server = self._start_server()

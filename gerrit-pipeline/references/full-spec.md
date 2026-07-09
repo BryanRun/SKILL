@@ -1718,6 +1718,10 @@ unzip -l release/telemetry-gateway-v2.0.3.zip
 unzip -l release/telemetry-gateway-v2.0.3.zip | grep -F "telemetry-gateway/scripts/status.sh"
 unzip -l release/telemetry-gateway-v2.0.3.zip | grep -F "telemetry-gateway/scripts/restart.sh"
 unzip -p release/telemetry-gateway-v2.0.3.zip telemetry-gateway/app.py | grep -F 'TelemetryGateway/2.0.3'
+unzip -p release/telemetry-gateway-v2.0.3.zip telemetry-gateway/app.py | grep -F '"/version"'
+unzip -p release/telemetry-gateway-v2.0.3.zip telemetry-gateway/scripts/status.sh | grep -F '/version'
+unzip -p release/telemetry-gateway-v2.0.3.zip telemetry-gateway/.env.example | grep -F 'gerrit-pipeline-v2.0.0'
+unzip -p release/telemetry-gateway-v2.0.3.zip telemetry-gateway/.env.example | grep -F 'gerrit-pipeline-v2.0.1'
 unzip -p release/telemetry-gateway-v2.0.3.zip telemetry-gateway/.env.example | grep -F 'gerrit-pipeline-v2.0.2'
 unzip -p release/telemetry-gateway-v2.0.3.zip telemetry-gateway/.env.example | grep -F 'gerrit-pipeline-v2.0.3'
 sha256sum release/gerrit-pipeline-v2.0.3.zip release/telemetry-gateway-v2.0.3.zip
@@ -1783,7 +1787,7 @@ git push origin "$(git branch --show-current)"
 4. **落后目标分支阻塞**：单仓、多仓、amend、cherry-pick 在 push 前均必须确认 `HEAD` 基于最新 `autolink/{目标分支}`；不满足时中止流水线，提示用户 rebase/merge 后重试
 5. **Telemetry key 轮换**：客户端默认 `key_id` 和内置 HMAC secret 轮换到 `gerrit-pipeline-v2.0.3`；Gateway 发布包升级到 `telemetry-gateway-v2.0.3`
 6. **Gateway 鉴权边界收紧**：`/telemetry/events` 仅接受 HMAC 签名请求，`TELEMETRY_ADMIN_TOKEN` 只用于 `/readyz`、`/metrics` 和 `/telemetry/flush`
-7. **旧客户端兼容**：Gateway 支持 `TELEMETRY_HMAC_KEYS` 同时配置 `gerrit-pipeline-v2.0.2` 与 `gerrit-pipeline-v2.0.3`，服务端升级后旧客户端仍可继续上报
+7. **旧客户端兼容**：Gateway 支持 `TELEMETRY_HMAC_KEYS` 同时配置 `gerrit-pipeline-v2.0.0`、`gerrit-pipeline-v2.0.1`、`gerrit-pipeline-v2.0.2` 与 `gerrit-pipeline-v2.0.3`，服务端升级后所有 `2.0.x` 客户端均可继续上报
 8. **发布清单补强**：飞书 zip 与 SkillPack tarball 预检均检查 `scripts/commit_msg_guard.py`、`scripts/base_branch_guard.py` 和 telemetry 默认 key，避免发布包遗漏强制校验能力
 
 ### v2.0.2（2026/6/16）

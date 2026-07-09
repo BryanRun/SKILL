@@ -68,7 +68,18 @@ def print_json(prefix: str, status: int, body: object) -> bool:
     marker = "OK" if ok else "FAIL"
     print(f"{prefix}: {marker} http={status}")
     if isinstance(body, dict):
-        for key in ("ok", "error", "detail", "bitable_configured", "dry_run", "field_count", "db_path"):
+        for key in (
+            "ok",
+            "error",
+            "detail",
+            "service",
+            "version",
+            "server_version",
+            "bitable_configured",
+            "dry_run",
+            "field_count",
+            "db_path",
+        ):
             if key in body:
                 print(f"  {key}: {body[key]}")
         if "counts" in body:
@@ -128,11 +139,15 @@ health_ok = print_json("healthz", health_status, health_body)
 ready_ok = True
 metrics_ok = True
 if admin_token:
+    version_status, version_body = request_json(f"{base_url}/version", admin_token)
+    version_ok = print_json("version", version_status, version_body)
     ready_status, ready_body = request_json(f"{base_url}/readyz", admin_token)
     ready_ok = print_json("readyz", ready_status, ready_body)
     metrics_status, metrics_body = request_json(f"{base_url}/metrics", admin_token)
     metrics_ok = print_json("metrics", metrics_status, metrics_body)
 else:
+    version_ok = True
+    print("version: SKIP admin token missing")
     print("readyz: SKIP admin token missing")
     print("metrics: SKIP admin token missing")
 
@@ -149,7 +164,7 @@ if log_file.exists():
 else:
     print("log file missing")
 
-if health_ok and ready_ok and metrics_ok:
+if health_ok and version_ok and ready_ok and metrics_ok:
     sys.exit(0)
 sys.exit(1)
 PY

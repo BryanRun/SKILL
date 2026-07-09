@@ -31,7 +31,7 @@ Edit `.env`:
 
 ```bash
 TELEMETRY_ADMIN_TOKEN=<admin-token>
-TELEMETRY_HMAC_KEYS={"gerrit-pipeline-v2.0.2":"<old-hmac-secret>","gerrit-pipeline-v2.0.3":"<new-hmac-secret>"}
+TELEMETRY_HMAC_KEYS={"gerrit-pipeline-v2.0.0":"<2.0.x-legacy-hmac-secret>","gerrit-pipeline-v2.0.1":"<2.0.x-legacy-hmac-secret>","gerrit-pipeline-v2.0.2":"<2.0.x-legacy-hmac-secret>","gerrit-pipeline-v2.0.3":"<2.0.3-hmac-secret>"}
 TELEMETRY_REVOKED_KEY_IDS=
 FEISHU_APP_ID=<feishu-app-id>
 FEISHU_APP_SECRET=<feishu-app-secret>
@@ -43,8 +43,8 @@ Telemetry clients authenticate with versioned HMAC keys. Each request signs the
 HTTP method, path, UTC timestamp, nonce, and body SHA-256 through
 `X-GP-Key-Id`, `X-GP-Timestamp`, `X-GP-Nonce`, `X-GP-Body-SHA256`, and
 `X-GP-Signature`. Event write endpoints only accept HMAC-signed requests.
-`TELEMETRY_ADMIN_TOKEN` is only for operator endpoints such as `/readyz`,
-`/metrics`, and manual `/telemetry/flush`.
+`TELEMETRY_ADMIN_TOKEN` is only for operator endpoints such as `/version`,
+`/readyz`, `/metrics`, and manual `/telemetry/flush`.
 
 ## Feishu Bitable Fields
 
@@ -235,8 +235,9 @@ only at process startup.
 ./scripts/status.sh
 ```
 
-The status script is read-only. It prints pid status, `/healthz`, `/readyz`,
-`/metrics`, database path, log path, and recent warning/error log lines.
+The status script is read-only. It prints pid status, `/healthz`, `/version`,
+`/readyz`, `/metrics`, database path, log path, and recent warning/error log
+lines.
 
 Manual flush:
 
@@ -276,17 +277,19 @@ python3 ../gerrit-pipeline/scripts/telemetry_client.py \
   --verbose
 ```
 
-Confirm `/metrics` and the Feishu Bitable record after the test event.
+Confirm `/version`, `/metrics`, and the Feishu Bitable record after the test
+event.
 
 ### Key Rotation And Revocation
 
-`TELEMETRY_ADMIN_TOKEN` is only for administrator endpoints such as `/readyz`,
-`/metrics`, and `/telemetry/flush`; it is not accepted by `/telemetry/events`.
+`TELEMETRY_ADMIN_TOKEN` is only for administrator endpoints such as `/version`,
+`/readyz`, `/metrics`, and `/telemetry/flush`; it is not accepted by
+`/telemetry/events`.
 
 `TELEMETRY_HMAC_KEYS` is for telemetry clients and should be versioned:
 
 ```bash
-TELEMETRY_HMAC_KEYS={"gerrit-pipeline-v2.0.2":"old-secret","gerrit-pipeline-v2.0.3":"new-secret"}
+TELEMETRY_HMAC_KEYS={"gerrit-pipeline-v2.0.0":"2.0.x-legacy-secret","gerrit-pipeline-v2.0.1":"2.0.x-legacy-secret","gerrit-pipeline-v2.0.2":"2.0.x-legacy-secret","gerrit-pipeline-v2.0.3":"2.0.3-secret"}
 ```
 
 When a key is leaked or a version should stop reporting, revoke it and restart:
@@ -353,6 +356,8 @@ identify Feishu field, auth, or API errors.
 ```bash
 GATEWAY_URL=http://10.70.55.96:18080
 curl -i "$GATEWAY_URL/healthz"
+curl -i "$GATEWAY_URL/version" \
+  -H "Authorization: Bearer $TELEMETRY_ADMIN_TOKEN"
 curl -i "$GATEWAY_URL/readyz" \
   -H "Authorization: Bearer $TELEMETRY_ADMIN_TOKEN"
 ```

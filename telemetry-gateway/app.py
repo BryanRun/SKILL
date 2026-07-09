@@ -29,6 +29,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB_PATH = BASE_DIR / "data" / "telemetry.sqlite3"
 FEISHU_BASE_URL = "https://open.feishu.cn/open-apis"
+GATEWAY_VERSION = "2.0.3"
 
 DATE_KEYS = {"received_at", "client_time"}
 NUMBER_KEYS = {
@@ -805,12 +806,22 @@ def check_hmac_auth(handler: BaseHTTPRequestHandler, raw_body: bytes) -> bool:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "TelemetryGateway/2.0.3"
+    server_version = f"TelemetryGateway/{GATEWAY_VERSION}"
 
     def do_GET(self) -> None:
         path = urllib.parse.urlparse(self.path).path
         if path == "/healthz":
             json_response(self, 200, {"ok": True, "service": "telemetry-gateway"})
+            return
+        if path == "/version":
+            if not require_admin_auth(self):
+                return
+            json_response(self, 200, {
+                "ok": True,
+                "service": "telemetry-gateway",
+                "version": GATEWAY_VERSION,
+                "server_version": self.server_version,
+            })
             return
         if path == "/readyz":
             if not require_admin_auth(self):
