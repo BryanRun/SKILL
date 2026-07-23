@@ -231,7 +231,7 @@ def parse_hmac_keys() -> Dict[str, str]:
         for key, value in keys.items()
         if key and value
     }
-    key_id = os.environ.get("TELEMETRY_HMAC_KEY_ID", "gerrit-pipeline-v2.0.3")
+    key_id = os.environ.get("TELEMETRY_HMAC_KEY_ID", "gerrit-pipeline-v2.1.0")
     secret = os.environ.get("TELEMETRY_HMAC_SECRET", "")
     if key_id and secret:
         parsed.setdefault(key_id, secret)

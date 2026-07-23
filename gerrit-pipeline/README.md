@@ -1,6 +1,6 @@
 # gerrit-pipeline — 使用说明
 
-**版本：v2.0.3**
+**版本：v2.1.0**
 
 gerrit-pipeline 是一个 Claude Code 优先、Agent Neutral 兼容的 Skill，为车联 AutoLink 团队提供 Gerrit 代码提交评审一站式自动化能力。Claude Code 中可获得最佳体验：斜杠命令、结构化确认、多选、Skill 调用都能直接串联；其他 Agent 只要支持读取 skill 文档、执行脚本、与用户确认/选择，也可以按同一流程执行。v1.9.0 起，原 Step 3（Checklist 确认）与原 Step 3.5（飞书通知前确认）合并为单一确认屏，在不降低安全红线的前提下减少交互弹窗。目标是减少重复操作、统一提交规范、加速 Code Review 闭环。
 
@@ -10,7 +10,8 @@ gerrit-pipeline 是一个 Claude Code 优先、Agent Neutral 兼容的 Skill，�
 Step 1: 代码提交    → 生成规范 commit message + push 到 Gerrit
 Step 2: 代码评审    → 七维自动评审 + 结果贴回 Gerrit
 Step 3: 合并确认    → 同屏展示 Checklist 预览 + 飞书通知预览，一次确认后贴 Checklist
-Step 4: 飞书通知    → Checklist 全部成功后发送评审结果卡片到飞书群，@审核人
+Step 4: 飞书通知    → Checklist 全部成功后发送带 Meego 链接的评审结果卡片到飞书群，@审核人
+Step 5: Meego 同步  → 将 CR 结果回写到对应 Meego 工作项评论
 ```
 
 ## 2. 首次使用配置
@@ -19,7 +20,7 @@ Step 4: 飞书通知    → Checklist 全部成功后发送评审结果卡片到
 
 - **推荐运行时：Claude Code**。直接使用 `/gerrit-pipeline`、`配置 gerrit-pipeline` 和结构化交互，步骤最少
 - **兼容运行时：其他 Agent**。需具备 shell/Python 执行能力、用户确认/选择能力，并能调用或复用 `enhanced_code_review`
-- **交互等价原则**：文档中的 `AskUserQuestion` 表示结构化确认/选择/输入；非 Claude Agent 可用等价表单、多选控件或清晰的对话提问实现，但不能省略 JIRA 确认、commit message 确认、Checklist 责任声明等红线
+- **交互等价原则**：文档中的 `AskUserQuestion` 表示结构化确认/选择/输入；非 Claude Agent 可用等价表单、多选控件或清晰的对话提问实现，但不能省略 Meego 工作项 URL 确认、commit message 确认、Checklist 责任声明等红线
 
 ### 2.1 前置条件
 
@@ -123,7 +124,7 @@ gp
 提交并评审
 ```
 
-执行 Agent 会按 Step 1 → 2 → 3 → 4 顺序自动执行全部步骤。
+执行 Agent 会按 Step 1 → 2 → 3 → 4 → 5 顺序自动执行全部步骤。
 
 ### 3.2 独立操作
 
@@ -133,7 +134,7 @@ gp
 |------|------|---------|
 | `pipeline submit` / `gerrit submit` / `提交代码` | 仅提交代码 | 当前仓库有未提交变更 |
 | `gerrit amend` | Amend 追加 patchset | 当前仓库有未提交变更 + 已有 Change |
-| `gerrit cherry-pick` | Cherry-pick 到其他分支 | 目标分支名 + JIRA-ID 确认 |
+| `gerrit cherry-pick` | Cherry-pick 到其他分支 | 目标分支名 + Meego 工作项 URL 确认 |
 | `pipeline review <CR编号>` | 仅评审 | CR 编号 |
 | `pipeline checklist <CR编号>` | 仅贴 Checklist | CR 编号 |
 | `pipeline notify` | 仅发飞书通知 | CR 编号 + 评审结果 |
@@ -149,11 +150,11 @@ gp
 | 1 | 确认提交模式（新建 / Amend / Cherry-pick） | 必选 | 触发指令中已包含模式关键词时自动跳过 |
 | 2 | 判定提交范围 | 自动（仅新建提交） | 显式多仓关键词直接进入多仓；用户提供仓库路径时按路径数量判定且不扫描；显式单仓关键词直接进入单仓；无显式意图时，普通 Git 仓库只查当前仓库，repo workspace 先询问是否全局扫描（20 秒超时） |
 | 3 | 选择所属项目 | 可选 | 仅在配置了 `projects` 时触发；只有一个项目时自动选中 |
-| 4 | JIRA-ID | 必选 | 不可跳过，必须通过交互确认 |
+| 4 | Meego 工作项 URL | 必选 | 不可跳过，必须通过交互确认 |
 | 5 | 新建提交信息批量确认 | 必选（仅新建提交） | 同屏收集提交类型、概要描述、目标分支、是否添加【开发自测视频】 |
 | 6 | 确认关联仓库列表 | 必选（仅关联提交） | 自动扫描结果作为 multiSelect 候选项呈现，用户明确勾选本次需要关联提交的仓库 |
 | 7 | Topic 名称 | 必选（仅关联提交） | |
-| 8 | 确认 commit message | 必选 | 展示生成的 commit message，用户确认或修改 |
+| 8 | 确认 commit message | 必选 | 展示生成的 commit message，标题下方 body 首行包含完整 `【Meego工作项URL】`，用户确认或修改 |
 | 8.5 | push 前基线校验 | 自动 | 执行 `base_branch_guard.py`，确认当前 `HEAD` 基于最新 `autolink/<目标分支>`，否则阻塞 push |
 
 #### Step 2：代码评审
@@ -168,7 +169,11 @@ gp
 
 #### Step 4：飞书通知
 
-无用户交互，自动执行。
+无用户交互，自动执行。飞书通知卡片会展示 Meego 工作项入口，优先使用用户确认的 Meego 工作项 URL 渲染为可点击链接。
+
+#### Step 5：Meego 同步
+
+无用户交互，自动执行。将 CR 链接、评审结果、Checklist 状态和问题统计写入对应 Meego 工作项评论。
 
 ## 4. 配置文件结构
 
@@ -214,7 +219,7 @@ gp
 | `projects.<项目名>.feishu.chat_id` | 项目专属飞书群 ID，覆盖顶层 |
 | `projects.<项目名>.feishu.at_members` | 项目专属 @mention 审核人，覆盖顶层 |
 
-> **匹配规则**：Pipeline 在 Step 1 中通过 `AskUserQuestion` 或等价交互能力让用户选择本次提交所属项目（从 `projects` 的 key 列出）。匹配到的字段覆盖顶层默认值，未配置的字段自动 fallback。同一仓库可属于多个项目，每次提交时由用户选择。只有一个项目时自动选中，无 `projects` 配置时跳过。
+> **匹配规则**：Pipeline 在 Step 1 中通过 `AskUserQuestion` 或等价交互能力让用户选择本次提交所属项目（从 `projects` 的 key 列出）。匹配到的字段覆盖顶层默认值，未配置的字段自动 fallback。同一仓库可属于多个项目，每次提交时由用户选择。Meego 工作项上下文从用户提供的 URL 解析，不需要用户在 `config.json` 配置 Meego 凭证或接口地址。只有一个项目时自动选中，无 `projects` 配置时跳过。
 
 ### 4.1 按项目配置管理
 
@@ -239,9 +244,10 @@ python3 pipeline_config.py remove-project --name "D01"
 | 脚本 | 用途 |
 |------|------|
 | `pipeline_config.py` | 配置管理（init / show / lookup-users / add-project / list-projects / remove-project） |
-| `feishu_notify.py` | 发送飞书群通知（读取配置，支持 @mention） |
-| `gerrit_post_checklist.py` | 贴 Checklist 到 Gerrit CR 评论 |
-| `gerrit_post_review.py` | 贴评审结论到 Gerrit CR 评论 |
+| `feishu_notify.py` | 发送飞书群通知（读取配置，支持 @mention 和 Meego 工作项链接） |
+| `gerrit_post_checklist.py` | 贴 Checklist 到 Gerrit CR 评论，并在 `---` 分割线后自动追加 `Powered by gerrit-pipeline v<skill.json version>` |
+| `gerrit_post_review.py` | 贴评审结论到 Gerrit CR 评论，并在 `---` 分割线后自动追加 `Powered by gerrit-pipeline v<skill.json version>` |
+| `meego_client.py` | 解析 Meego 工作项链接，并在 Step 5 将 CR 结果回写到工作项评论；评论末尾同样在 `---` 分割线后追加版本页脚 |
 | `telemetry_client.py` | 内部运行指标后台上报 |
 | `telemetry_defaults.json` | 内置运行指标默认配置 |
 
@@ -260,7 +266,7 @@ v2.0.0 起，gerrit-pipeline 默认启用内部运行指标上报。配置随 sk
 3. Gerrit SSH 访问权限（用于 git push）
 4. **enhanced_code_review skill**：Step 2（代码评审）依赖此 skill 提供七维自动评审能力。Claude Code 默认同步安装到 `~/.claude/skills/`；其他 Agent 安装到各自的 skill/插件目录，并确保 gerrit-pipeline 能调用其等价流程
 
-> Step 1（代码提交）、Step 3（Checklist）、Step 4（飞书通知）为内置能力，无额外 skill 依赖。
+> Step 1（代码提交）、Step 3（Checklist）、Step 4（飞书通知）为内置能力；Step 5（Meego 同步）使用 skill 内置 Meego OpenAPI plugin 凭证和管理员 `user_key`，普通用户只需提供 Meego 工作项 URL。
 
 ## 8. 常见问题
 
@@ -289,6 +295,9 @@ v2.0.0 起，gerrit-pipeline 默认启用内部运行指标上报。配置随 sk
 
 | 版本 | 日期 | 变更摘要 |
 |------|------|---------|
+| v2.1.0 | 2026-07-23 | 1. Step 4 飞书通知新增可点击的 Meego 工作项入口，优先使用用户提供的工作项 URL<br>2. commit message 标题下方 body 首行新增完整 `【Meego工作项URL】`，便于 Gerrit 页面直接点击跳转<br>3. 新增 Step 5 Meego 同步，将 CR 链接、评审结果、Checklist 状态和问题统计回写到工作项评论<br>4. Meego OpenAPI plugin 凭证和管理员 `user_key` 随 skill 内置，用户无需在 `config.json` 中配置 Meego 密钥、用户标识或接口地址<br>5. Telemetry 默认 key 轮换到 `gerrit-pipeline-v2.1.0`，Gateway 保留 `2.0.x` 兼容 key 并新增 `v2.1.0` 接收入口 |
+| v2.0.5 | 2026-07-21 | 1. 新增 Step 5 Meego 同步，通过 `meego_client.py` 将 CR 结果回写到对应 Meego 工作项评论<br>2. 飞书通知卡片展示 Meego 工作项入口，便于从通知直接定位到工作项<br>3. 评审结论、Checklist 和 Meego 评论统一追加 `Powered by gerrit-pipeline v&lt;skill.json version&gt;` |
+| v2.0.4 | 2026-07-17 | 1. 提交规范从 `JIRA-ID` 切换为 Meego 工单 ID/工作项 ID<br>2. 旧 Jira Key 形态全面弃用，不再作为合法任务关联字段接受<br>3. 因 Meego ID 格式暂未统一，commit message guard 仅校验工作项字段存在并使用中文方括号包裹 |
 | v2.0.3 | 2026-07-03 | 1. 新增 `scripts/commit_msg_guard.py`，在 commit 后、push 前强制校验 commit message 并清理 Cursor 等运行时追加的 forbidden trailer<br>2. 新增 `scripts/base_branch_guard.py`，push 前 fetch `autolink` 目标分支并校验 `HEAD` 基于最新 `autolink/<目标分支>`<br>3. 单仓、多仓、amend、cherry-pick 均在 push 前阻塞模板外 trailer 和落后目标分支的提交<br>4. Telemetry 默认 key 轮换到 `gerrit-pipeline-v2.0.3`，Gateway 管理接口与事件写入鉴权边界收紧，并通过多 key 配置兼容全部 `v2.0.x` 客户端<br>5. 发版清单补齐 commit message guard、base branch guard 与 Gateway v2.0.3 产物 |
 | v2.0.2 | 2026-06-16 | 1. 补强独立操作 telemetry 收尾规范，明确 `submit`、`review`、`checklist`、`notify` 单步执行也必须上报 `single_step` 事件<br>2. 明确完整流水线不得套用独立操作 telemetry 模板，避免全流程重复上报多个单步事件<br>3. 不改变 Gateway、遥测字段结构和主流程脚本行为 |
 | v2.0.1 | 2026-06-15 | 1. 补强遥测字段：新增 `entry_mode`、`steps`、`is_full_pipeline`、`run_id` 和 `agent_source`，准确记录入口、步骤顺序、是否全流程和运行时来源<br>2. 耗时字段统一为秒级 `duration_s` / `*_duration_s`，Gateway 兼容旧毫秒字段并自动派生到新列<br>3. 新增 Gateway 管理脚本和 run context 自动清理，便于管理员查看状态、重启服务和控制本地缓存 |

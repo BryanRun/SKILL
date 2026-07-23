@@ -1,7 +1,7 @@
 {
   "enabled": true,
   "url": "http://10.70.55.96:18080",
-  "key_id": "gerrit-pipeline-v2.0.3",
+  "key_id": "gerrit-pipeline-v2.1.0",
   "timeout_seconds": 2,
-  "hmac_secret": "b186f717db0027e891bd0aafabb6be3a65f5b99034692f3b0378f2c6dbe7b50c"
+  "hmac_secret": "14e02e32c3681cee79017546e4942cbdc5fdba8eb6e1b47bd90475b15bc1d37c"
 }

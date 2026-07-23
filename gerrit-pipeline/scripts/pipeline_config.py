@@ -81,7 +81,6 @@ def resolve_config(project_name=None):
     if "feishu" in proj:
         for k, v in proj["feishu"].items():
             merged.setdefault("feishu", {})[k] = v
-
     return merged, project_name
 
 

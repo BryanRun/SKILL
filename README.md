@@ -7,7 +7,7 @@ A collection of Claude Code-first, agent-compatible skills for automotive middle
 | Skill | Description | Version |
 |-------|-------------|---------|
 | [enhanced_code_review](./enhanced_code_review/) | 6-dimension code review with Gerrit and local module support | 2.0.0 |
-| [gerrit-pipeline](./gerrit-pipeline/) | One-click pipeline: submit → review → checklist → Feishu notification | 2.0.3 |
+| [gerrit-pipeline](./gerrit-pipeline/) | One-click pipeline: submit → review → checklist → Feishu notification → Meego sync | 2.1.0 |
 | [gerrit-submit](./gerrit-submit/) | Gerrit commit message generation, push, amend, and cherry-pick | - |
 | [feishu-docs](./feishu-docs/) | Read, create, edit, and export Feishu (Lark) documents and whiteboards | - |
 
@@ -28,13 +28,14 @@ Supports both Gerrit CR review (`review CR <number>`) and local module review (`
 
 ### Gerrit Pipeline
 
-End-to-end pipeline that chains four steps in strict order:
+End-to-end pipeline that chains five steps in strict order:
 
 ```
 Step 1: Code Submit    → Generate commit message + git push → CR number
 Step 2: Code Review    → 6-dimension review + post to Gerrit
 Step 3: Confirm        → Checklist + Feishu notification confirmation
-Step 4: Feishu Notify  → Send result card to Feishu group chat after checklist succeeds
+Step 4: Feishu Notify  → Send result card with Meego link to Feishu group chat
+Step 5: Meego Sync     → Write CR result back to the Meego work item comment
 ```
 
 Each step can also be triggered independently.
@@ -51,7 +52,7 @@ the user-facing `gerrit-pipeline` skill release.
 
 Assists with Gerrit code submission workflows:
 
-- Generate commit messages following company conventions (`【bug/change/feature】JIRA-ID: summary`)
+- Generate commit messages following company conventions (`【bug】【Meego工单ID或工作项ID】summary`)
 - Push new Changes to Gerrit with configured reviewers
 - Amend existing Changes (append patchset)
 - Cherry-pick commits to other branches
@@ -103,7 +104,7 @@ review CR 993636
 # Local module review (no CR needed)
 review frameworks/cm/videoplayer
 
-# Full pipeline: submit + review + checklist + notify
+# Full pipeline: submit + review + checklist + notify + meego sync
 gerrit pipeline
 
 # Submit code to Gerrit

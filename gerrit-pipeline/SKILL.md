@@ -8,13 +8,14 @@ description: >-
 
 # Gerrit Pipeline
 
-将代码提交、自动评审、Checklist 与飞书通知串联为一键流水线：
+将代码提交、自动评审、Checklist、飞书通知与 Meego 同步串联为一键流水线：
 
 ```text
 Step 1: 代码提交    -> 生成规范 commit message + push 到 Gerrit
 Step 2: 代码评审    -> 调用 enhanced_code_review + 结果贴回 Gerrit
 Step 3: 合并确认    -> Checklist 预览 + 飞书通知预览 + 责任声明
-Step 4: 飞书通知    -> Checklist 全部成功后发送飞书卡片
+Step 4: 飞书通知    -> Checklist 全部成功后发送带 Meego 链接的飞书卡片
+Step 5: Meego 同步  -> 将 CR 结果回写到对应 Meego 工作项评论
 ```
 
 完整规范保存在 `references/full-spec.md`。执行任何复杂流程、边界处理或发版操作时，必须先读取该文件对应章节。
@@ -23,7 +24,7 @@ Step 4: 飞书通知    -> Checklist 全部成功后发送飞书卡片
 
 - 用户需要将本地代码提交到 Gerrit，并希望串联自动评审、Checklist 和飞书通知。
 - 用户明确提到 `gerrit pipeline`、`gp`、`pipeline submit`、`pipeline notify`、提交 CR、关联提交、多仓 topic、Checklist 或飞书评审通知。
-- 当前任务涉及 AutoLink Gerrit 工作流，且需要遵守固定 commit message、JIRA-ID 确认、Reviewer、Checklist 和通知规则。
+- 当前任务涉及 AutoLink Gerrit 工作流，且需要遵守固定 commit message、Meego 工作项 URL 确认、Reviewer、Checklist 和通知规则。
 
 ## Prerequisites
 
@@ -36,7 +37,7 @@ Step 4: 飞书通知    -> Checklist 全部成功后发送飞书卡片
 
 - 用户只是询问 Git、Gerrit 或飞书的一般知识，不需要执行提交/评审/通知流程。
 - 当前目录不是目标代码仓库，且用户没有提供仓库路径。
-- 用户要求绕过 JIRA-ID、commit message 确认、Checklist 责任声明或 Gerrit 审核纪律。
+- 用户要求绕过 Meego 工作项 URL、commit message 确认、Checklist 责任声明或 Gerrit 审核纪律。
 - 用户只需要普通文件打包、SkillPack 发布或飞书文档编辑；这些应使用对应发版流程或 feishu-docs 能力。
 
 ## 触发方式
@@ -63,16 +64,17 @@ Claude Code 中优先使用 `/gerrit-pipeline`。Codex、Cursor、Her 或其他 
 
 ## 执行红线
 
-1. 完整流水线必须按 Step 1 -> Step 2 -> Step 3 -> Step 4 执行。
+1. 完整流水线必须按 Step 1 -> Step 2 -> Step 3 -> Step 4 -> Step 5 执行。
 2. 提交模式必须显式确认：新建提交 / Amend / Cherry-pick，不得仅凭 git 状态推断。
-3. JIRA-ID 必须通过用户确认，不可跳过。
+3. Meego 工作项 URL 必须通过用户确认，不可跳过；commit message 标题中写入从 URL 解析出的工作项编号，body 第一行写入完整 `【Meego工作项URL】` 供 Gerrit 页面点击跳转。
 4. commit message 必须最终展示给用户确认或修改。
 5. Checklist 模板必须按完整模板原样输出，不能依据评审结果自动改写检查项。
 6. 任一 Checklist 贴回失败时，不得发送飞书通知。
-7. 飞书通知 `--subject` 必须与 commit message 第一行完全一致。
+7. 飞书通知 `--subject` 必须与 commit message 第一行完全一致，并在卡片中展示可点击的 Meego 工作项入口；优先使用用户提供的 `--work-item-url`。
 8. 多仓关联提交必须使用统一 topic，参与仓库由用户明确确认。
 9. commit message body 禁止任何模板外 trailer，包括 `Co-authored-by`、`Signed-off-by`、`Made-with: Cursor`；即使由 Cursor 等运行时自动追加，也必须在 push 前删除并重新校验。
 10. 所有 push 前必须确认当前 `HEAD` 已基于最新 `autolink/<目标分支>`；未基于最新目标分支时必须中止，让用户 rebase/merge 后重试。
+11. Step 5 Meego 同步在飞书通知后执行，同步失败必须报告给用户，但不回滚已发送飞书通知或已贴出的 Gerrit 评论。
 
 ## Step 1 提交范围判定
 
@@ -92,7 +94,7 @@ Claude Code 中优先使用 `/gerrit-pipeline`。Codex、Cursor、Her 或其他 
 必须收集或确认：
 
 - 项目（配置了 `projects` 时）
-- JIRA-ID
+- Meego 工作项 URL（用于解析工作项编号、填入 commit message body 首行并生成可点击入口）
 - 提交类型：`bug` / `change` / `feature`
 - 目标分支
 - 概要描述
@@ -128,7 +130,7 @@ git push autolink HEAD:refs/for/<branch>%r=<reviewer1>,r=<reviewer2>,topic=<topi
 
 Amend 流程用于已有 Change 追加 patchset，必须保留原 Change-Id。不得用普通 `git commit` 创建新 Change。
 
-Cherry-pick 流程必须确认目标分支和 JIRA-ID；如冲突，解决后继续 cherry-pick，再按规范 push 到 Gerrit。
+Cherry-pick 流程必须确认目标分支和 Meego 工作项 URL；如冲突，解决后继续 cherry-pick，再按规范 push 到 Gerrit。
 
 Amend / Cherry-pick 在 push 前同样必须执行 `scripts/commit_msg_guard.py sanitize-head` 和 `scripts/base_branch_guard.py --branch <目标分支>`，保留 `Change-Id` 并阻塞任何模板外 trailer 或落后目标分支的 HEAD。
 
@@ -136,17 +138,17 @@ Amend / Cherry-pick 在 push 前同样必须执行 `scripts/commit_msg_guard.py 
 
 调用或复用 `enhanced_code_review`，评审范围仅限本次修改及强相关代码。评审结论必须完整展示并贴回 Gerrit。
 
-Gerrit 禁止 self-review 打分，因此评审评论以不带 Code-Review label 的方式贴出；如 enhanced_code_review 未贴回，使用 `scripts/gerrit_post_review.py` 兜底。
+Gerrit 禁止 self-review 打分，因此评审评论以不带 Code-Review label 的方式贴出；如 enhanced_code_review 未贴回，使用 `scripts/gerrit_post_review.py` 兜底。由 `gerrit_post_review.py` 贴回的评审结论末尾会先加一条 `---` 分割线，再追加 `Powered by gerrit-pipeline v<skill.json version>`。
 
 ## Step 3 Checklist
 
-Checklist 固定模板在完整规范 `references/full-spec.md` 中维护。执行时必须完整展示模板与责任声明，由用户确认后贴回 Gerrit。
+Checklist 固定模板在完整规范 `references/full-spec.md` 中维护。执行时必须完整展示模板与责任声明，由用户确认后贴回 Gerrit。由 `gerrit_post_checklist.py` 贴回的 Checklist 末尾会先加一条 `---` 分割线，再追加 `Powered by gerrit-pipeline v<skill.json version>`。
 
 多仓场景只展示一份固定模板预览，但执行级仍逐 CR 串行贴回。
 
 ## Step 4 飞书通知
 
-所有 Checklist 贴回成功后，调用 `scripts/feishu_notify.py`。
+所有 Checklist 贴回成功后，调用 `scripts/feishu_notify.py`。通知卡片必须展示 Meego 工作项入口；执行 Agent 必须传入用户确认的 `--work-item-url`，脚本据此渲染可点击链接。
 
 单仓示例：
 
@@ -156,6 +158,7 @@ python3 scripts/feishu_notify.py \
   --url "<Gerrit Change URL>" \
   --branch <目标分支> \
   --subject "<commit message 第一行>" \
+  --work-item-url "<Meego工作项URL>" \
   --project "<项目名称>" \
   --score <评审评分> \
   --p0 <P0数> --p1 <P1数> --p2 <P2数> --p3 <P3数> \
@@ -164,12 +167,32 @@ python3 scripts/feishu_notify.py \
 
 多仓增加 `--topic` 和 `--repos`，一次汇总所有 CR。
 
+## Step 5 Meego 同步
+
+飞书通知发送完成后，调用 `scripts/meego_client.py sync` 将本次 CR 结果写入对应 Meego 工作项评论。工作项信息必须从 `--work-item-url` 解析；兼容参数 `--work-item-id` 只用于历史命令的文本兜底，不提供 API 上下文或可点击链接。该评论末尾会先加一条 `---` 分割线，再追加 `Powered by gerrit-pipeline v<skill.json version>` 和 `Sync ID`。
+
+```bash
+python3 scripts/meego_client.py sync \
+  --cr <CR编号> \
+  --url "<Gerrit Change URL>" \
+  --branch <目标分支> \
+  --subject "<commit message 第一行>" \
+  --work-item-url "<Meego工作项URL>" \
+  --project "<项目名称>" \
+  --score <评审评分> \
+  --p0 <P0数> --p1 <P1数> --p2 <P2数> --p3 <P3数> \
+  --checklist <pass|warn|fail>
+```
+
+Meego OpenAPI plugin 凭证和管理员 `user_key` 随 skill 内置。普通用户只需提供工作项 URL，不需要在 `config.json` 配置 Meego 凭证、用户标识或接口地址。URL 无法解析、凭证权限不足或接口失败时，执行 Agent 应向用户报告 Step 5 未同步的原因，并保留 Step 1-4 的完成状态。
+
 ## 配置脚本
 
 - `scripts/pipeline_config.py`：配置管理、项目配置、用户 open_id 查询
-- `scripts/gerrit_post_review.py`：评审结论贴回
-- `scripts/gerrit_post_checklist.py`：Checklist 贴回
-- `scripts/feishu_notify.py`：飞书通知卡片
+- `scripts/gerrit_post_review.py`：评审结论贴回，自动在 `---` 分割线后追加 gerrit-pipeline 版本页脚
+- `scripts/gerrit_post_checklist.py`：Checklist 贴回，自动在 `---` 分割线后追加 gerrit-pipeline 版本页脚
+- `scripts/feishu_notify.py`：飞书通知卡片，展示可点击 Meego 工作项入口
+- `scripts/meego_client.py`：解析 Meego 工作项链接并在 Step 5 回写工作项评论，自动在 `---` 分割线后追加版本页脚
 - `scripts/commit_msg_guard.py`：commit message 强制校验与 Cursor 归因 trailer 清理
 - `scripts/base_branch_guard.py`：push 前确认 `HEAD` 基于最新 `autolink/<目标分支>`
 - `scripts/telemetry_client.py`：非阻塞执行遥测上报
@@ -212,7 +235,7 @@ python3 scripts/telemetry_client.py \
   --event-type pipeline_done \
   --mode full_pipeline \
   --entry-mode submit \
-  --steps submit,review,checklist,notify \
+  --steps submit,review,checklist,notify,meego_sync \
   --is-full-pipeline true \
   --agent codex \
   --success true \
@@ -220,9 +243,9 @@ python3 scripts/telemetry_client.py \
 ```
 
 失败场景将 `--success false`，并传入稳定的 `--error-code`，如
-`step1_submit_failed`、`step2_review_failed`、`step3_checklist_failed` 或
-`step4_notify_failed`；
-同时传入 `--failure-stage`，如 `submit`、`review`、`checklist` 或 `notify`。
+`step1_submit_failed`、`step2_review_failed`、`step3_checklist_failed`、
+`step4_notify_failed` 或 `step5_meego_sync_failed`；
+同时传入 `--failure-stage`，如 `submit`、`review`、`checklist`、`notify` 或 `meego_sync`。
 `--agent` 必须由执行 Agent 显式传入，如 `claude-code`、`codex`、`cursor`、`deepseek`、`qwen`；无法判断时传 `unknown`。
 
 独立操作完成前也必须触发 telemetry，不得因为没有 full pipeline run context 而跳过。单步操作使用 `--mode single_step`，并用 `--entry-mode` 与 `--steps` 记录真实入口和执行步骤。完整流水线中不得套用独立操作 telemetry 模板；完整流水线只在最终报告输出前发送一次 `full_pipeline` 事件：

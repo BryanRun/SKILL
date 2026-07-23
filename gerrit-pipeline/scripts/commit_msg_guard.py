@@ -11,6 +11,7 @@ import tempfile
 
 
 REQUIRED_FIELDS = [
+    ("【Meego工作项URL】", 1, 300),
     ("【原因分析】", 8, 50),
     ("【解决方案】", 8, 50),
     ("【自测用例】", 20, 50),
@@ -27,12 +28,13 @@ DEV_VIDEO_VALUE = "申请豁免，原因：已自测通过，请实车验证"
 FIELD_ORDER = [item[0] for item in REQUIRED_FIELDS] + [DEV_VIDEO_FIELD]
 FIELD_LIMITS = dict((field, (min_len, max_len)) for field, min_len, max_len in REQUIRED_FIELDS)
 
-TITLE_PREFIX_RE = re.compile(r"^【(bug|change|feature)】【")
-JIRA_RE = re.compile(r"【[A-Z][A-Z0-9]*-[0-9]+】")
-TITLE_FULL_RE = re.compile(r"^【(bug|change|feature)】【[A-Z][A-Z0-9]*-[0-9]+】(.+)$")
+TITLE_TYPE_RE = re.compile(r"^【(bug|change|feature)】")
+TITLE_FULL_RE = re.compile(r"^【(bug|change|feature)】【([^】\r\n]+)】(.+)$")
+LEGACY_JIRA_KEY_RE = re.compile(r"^[A-Z][A-Z0-9]*-[0-9]+$")
 TOPIC_SEQ_RE = re.compile(r"【([0-9]+)/([0-9]+)】")
 VERSION_RE = re.compile(r"^After [0-9]{4}/[0-9]{1,2}/[0-9]{1,2}$")
 CHANGE_ID_RE = re.compile(r"^Change-Id:\s+I[0-9a-fA-F]{8,}$")
+MEEGO_URL_RE = re.compile(r"^https://project\.feishu\.cn/[^/\s]+/[^/\s]+/detail/[^?\s]+(?:\?\S*)?$")
 
 FORBIDDEN_TRAILER_PATTERNS = [
     re.compile(r"^\s*co-authored-by\s*:", re.IGNORECASE),
@@ -79,14 +81,20 @@ def lint_message(message):
         return ["commit message 为空"]
 
     title = lines[0]
-    if not TITLE_PREFIX_RE.search(title):
+    if not TITLE_TYPE_RE.search(title):
         errors.append("标题格式不符，必须以【bug】、【change】或【feature】开头")
-    if not JIRA_RE.search(title):
-        errors.append("缺少 JIRA-ID、格式不符或未用【】包裹")
 
     title_match = TITLE_FULL_RE.search(title)
-    if title_match:
-        summary_part = title_match.group(2)
+    if not title_match:
+        errors.append("标题格式不符，必须包含【类型】【Meego工单ID或工作项ID】概要描述")
+    else:
+        work_item_id = title_match.group(2).strip()
+        if not work_item_id:
+            errors.append("缺少 Meego 工单 ID/工作项 ID 或未用【】包裹")
+        elif LEGACY_JIRA_KEY_RE.search(work_item_id):
+            errors.append("旧 Jira ID 已弃用，请填写 Meego 工单 ID/工作项 ID")
+
+        summary_part = title_match.group(3)
         seq_matches = TOPIC_SEQ_RE.findall(title)
         if len(seq_matches) > 1:
             errors.append("标题中只能包含一个【x/y】标识")
@@ -144,6 +152,9 @@ def lint_message(message):
             if content != DEV_VIDEO_VALUE:
                 errors.append("%s 内容必须为固定值" % DEV_VIDEO_FIELD)
             continue
+
+        if matched_field == "【Meego工作项URL】" and not MEEGO_URL_RE.search(content):
+            errors.append("【Meego工作项URL】格式错误，必须为 https://project.feishu.cn/<project>/<type>/detail/<id>")
 
         min_len, max_len = FIELD_LIMITS[matched_field]
         content_len = len(content)

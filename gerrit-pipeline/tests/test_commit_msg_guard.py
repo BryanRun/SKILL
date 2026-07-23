@@ -3,8 +3,9 @@ import unittest
 from pathlib import Path
 
 
-VALID_MESSAGE = """【bug】【CHYT1V-1058】修复仪表双闪提示音异常
+VALID_MESSAGE = """【bug】【MG-工单-1058】修复仪表双闪提示音异常
 
+【Meego工作项URL】https://project.feishu.cn/pojw7j/task1/detail/7055606222
 【原因分析】双闪状态变化未触发提示音播放逻辑
 【解决方案】补充状态监听后触发提示音播放流程
 【自测用例】开启双闪后观察仪表提示音播放且关闭后声音停止
@@ -28,6 +29,30 @@ class CommitMsgGuardTest(unittest.TestCase):
 
     def test_lint_accepts_valid_message(self):
         self.assertEqual(self.guard.lint_message(VALID_MESSAGE), [])
+
+    def test_lint_rejects_legacy_jira_id(self):
+        message = VALID_MESSAGE.replace("MG-工单-1058", "CHYT1V-1058")
+
+        errors = self.guard.lint_message(message)
+
+        self.assertTrue(any("旧 Jira ID 已弃用" in error for error in errors))
+
+    def test_lint_rejects_missing_meego_url(self):
+        message = VALID_MESSAGE.replace("【Meego工作项URL】https://project.feishu.cn/pojw7j/task1/detail/7055606222\n", "")
+
+        errors = self.guard.lint_message(message)
+
+        self.assertTrue(any("缺少 【Meego工作项URL】" in error for error in errors))
+
+    def test_lint_rejects_invalid_meego_url(self):
+        message = VALID_MESSAGE.replace(
+            "https://project.feishu.cn/pojw7j/task1/detail/7055606222",
+            "https://example.com/7055606222",
+        )
+
+        errors = self.guard.lint_message(message)
+
+        self.assertTrue(any("【Meego工作项URL】格式错误" in error for error in errors))
 
     def test_lint_rejects_forbidden_trailers(self):
         message = VALID_MESSAGE + "Co-authored-by: Cursor <cursor@example.com>\nMade-with: Cursor\n"

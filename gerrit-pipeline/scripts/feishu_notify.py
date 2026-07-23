@@ -21,6 +21,7 @@
 import os, sys, json, time, argparse, datetime, re
 import requests
 from pipeline_config import resolve_config
+from meego_client import format_markdown_link, resolve_work_item_link
 
 BASE_URL = "https://open.feishu.cn/open-apis"
 CONFIG_PATH = os.path.expanduser("~/.config/gerrit-pipeline/config.json")
@@ -135,11 +136,23 @@ def build_card(args, at_members=None, submitter=None):
     return build_single_card(args, at_members=at_members, submitter=submitter)
 
 
+def _meego_link_for_card(args):
+    link = resolve_work_item_link(
+        subject=args.subject,
+        work_item_id=args.work_item_id,
+        work_item_url=args.work_item_url,
+        project_name=args.project,
+        strict=False,
+    )
+    return format_markdown_link(link.get("id"), link.get("url"))
+
+
 def build_single_card(args, at_members=None, submitter=None):
     score_display = _score_text(args.score)
     checklist_display = _checklist_text(args.checklist)
     issues = f"P0={args.p0}  P1={args.p1}  P2={args.p2}  P3={args.p3}"
     submit_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    meego_link = _meego_link_for_card(args)
 
     header_color = "green"
     if args.score < 0 or args.p0 > 0:
@@ -166,6 +179,12 @@ def build_single_card(args, at_members=None, submitter=None):
             "fields": [
                 {"is_short": True, "text": {"tag": "lark_md", "content": f"**CR 编号**\n[{args.cr}]({args.url})"}},
                 {"is_short": True, "text": {"tag": "lark_md", "content": f"**分支**\n{args.branch}"}},
+            ],
+        },
+        {
+            "tag": "div",
+            "fields": [
+                {"is_short": True, "text": {"tag": "lark_md", "content": f"**Meego 工作项**\n{meego_link or '-'}"}},
             ],
         },
         {
@@ -225,6 +244,7 @@ def build_topic_card(args, at_members=None, submitter=None):
     checklist_display = _checklist_text(args.checklist)
     issues = f"P0={args.p0}  P1={args.p1}  P2={args.p2}  P3={args.p3}"
     submit_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    meego_link = _meego_link_for_card(args)
 
     header_color = "green"
     if args.score < 0 or args.p0 > 0:
@@ -265,6 +285,12 @@ def build_topic_card(args, at_members=None, submitter=None):
             "fields": [
                 {"is_short": True, "text": {"tag": "lark_md", "content": f"**Topic**\n[{args.topic}]({topic_url})"}},
                 {"is_short": True, "text": {"tag": "lark_md", "content": f"**分支**\n{args.branch}"}},
+            ],
+        },
+        {
+            "tag": "div",
+            "fields": [
+                {"is_short": True, "text": {"tag": "lark_md", "content": f"**Meego 工作项**\n{meego_link or '-'}"}},
             ],
         },
         {
@@ -329,6 +355,8 @@ def main():
     ap.add_argument("--url", required=True, help="Gerrit Change URL（多仓库时逗号分隔）")
     ap.add_argument("--branch", default="al_dev", help="目标分支")
     ap.add_argument("--subject", required=True, help="提交标题，必须与 commit message 第一行完全一致")
+    ap.add_argument("--work-item-url", default="", help="Meego 工作项 URL（优先用于飞书卡片链接和 Meego 上下文解析）")
+    ap.add_argument("--work-item-id", default="", help="Meego 工单 ID/工作项 ID（兼容旧流程；默认从 --subject 提取）")
     ap.add_argument("--topic", default=None, help="Topic 名称（多仓库关联提交时必填）")
     ap.add_argument("--repos", default=None, help="各 CR 对应仓库名，逗号分隔（多仓库时必填，与 --cr 一一对应）")
     ap.add_argument("--score", type=int, default=1, help="评审评分 (-1/0/1)")

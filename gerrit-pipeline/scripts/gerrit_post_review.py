@@ -17,6 +17,44 @@ urllib3.disable_warnings()
 
 CONFIG_PATH = os.path.expanduser("~/.config/gerrit-pipeline/config.json")
 GERRIT_BASE = "https://gerrit.auto-link.com.cn"
+SKILL_JSON_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "skill.json")
+BRANDING_PREFIX = "Powered by gerrit-pipeline"
+GERRIT_AUTH = None
+
+
+def _read_skill_version():
+    try:
+        with open(SKILL_JSON_PATH, "r", encoding="utf-8") as f:
+            return str(json.load(f).get("version", "")).strip()
+    except Exception:
+        return ""
+
+
+def _branding_footer():
+    version = _read_skill_version()
+    if version:
+        return f"{BRANDING_PREFIX} v{version}"
+    return BRANDING_PREFIX
+
+
+def _append_branding_footer(text):
+    content = (text or "").rstrip()
+    footer = _branding_footer()
+    if not content:
+        return footer + "\n"
+    lines = content.splitlines()
+    if lines and lines[-1].strip().startswith(BRANDING_PREFIX):
+        lines = lines[:-1]
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if lines and lines[-1].strip() == "---":
+        lines.pop()
+        while lines and not lines[-1].strip():
+            lines.pop()
+    if lines:
+        joined = "\n".join(lines)
+        return f"{joined}\n\n---\n\n{footer}\n"
+    return footer + "\n"
 
 
 def _load_gerrit_auth():
@@ -34,7 +72,11 @@ def _load_gerrit_auth():
     return HTTPBasicAuth(user, pwd)
 
 
-GERRIT_AUTH = _load_gerrit_auth()
+def _gerrit_auth():
+    global GERRIT_AUTH
+    if GERRIT_AUTH is None:
+        GERRIT_AUTH = _load_gerrit_auth()
+    return GERRIT_AUTH
 
 
 def _strip(t):
@@ -46,7 +88,7 @@ def _strip(t):
 def gerrit_get(path):
     r = requests.get(
         f"{GERRIT_BASE}{path}",
-        auth=GERRIT_AUTH, verify=False, timeout=30,
+        auth=_gerrit_auth(), verify=False, timeout=30,
     )
     t = _strip(r.text)
     try:
@@ -58,7 +100,7 @@ def gerrit_get(path):
 def gerrit_post(path, body):
     r = requests.post(
         f"{GERRIT_BASE}{path}",
-        auth=GERRIT_AUTH, verify=False, timeout=30,
+        auth=_gerrit_auth(), verify=False, timeout=30,
         headers={"Content-Type": "application/json; charset=UTF-8"},
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
     )
@@ -116,6 +158,8 @@ def main():
     else:
         print("错误: 需要 --review 或 --review-text", file=sys.stderr)
         sys.exit(1)
+
+    review_text = _append_branding_footer(review_text)
 
     body = {
         "message": review_text,

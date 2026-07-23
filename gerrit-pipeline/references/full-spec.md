@@ -1,7 +1,7 @@
 ---
 name: gerrit-pipeline
 description: >-
-  Gerrit 一键提交评审流水线。串联 代码提交 → CR评审 → Checklist+飞书通知合并确认 流程，严格按 Step 1 → 2 → 3 → 4 顺序依次调用（v1.9.0 起 Step 3 合并原 Step 3.5 通知前确认）。每步均支持独立操作。
+  Gerrit 一键提交评审流水线。串联 代码提交 → CR评审 → Checklist+飞书通知合并确认 → Meego 同步 流程，严格按 Step 1 → 2 → 3 → 4 → 5 顺序依次调用（v1.9.0 起 Step 3 合并原 Step 3.5 通知前确认）。每步均支持独立操作。
   内置完整的 Gerrit 代码提交能力（commit message 规范、推送、amend、cherry-pick）。
   触发：gerrit pipeline / gp / 一键提交 / 提交并评审 / submit and review / 一键提交评审 /
   独立操作：pipeline submit / gerrit submit / gerrit push / gerrit amend / gerrit cherry-pick / 提交到gerrit / 推送代码 / 提交代码审查 / 推代码 / 提交CR /
@@ -10,7 +10,7 @@ description: >-
 
 # Gerrit Pipeline — 一键提交评审流水线
 
-将代码提交、自动评审、Checklist + 飞书通知前确认串联为一键流水线（Step 1 → 2 → 3 → 4，v1.9.0 起 Step 3 合并原 Step 3.5 的确认职责）。每步均支持独立操作。
+将代码提交、自动评审、Checklist + 飞书通知前确认 + Meego 同步串联为一键流水线（Step 1 → 2 → 3 → 4 → 5，v1.9.0 起 Step 3 合并原 Step 3.5 的确认职责）。每步均支持独立操作。
 
 代码提交能力（Step 1）已内置，无需安装 gerrit-submit skill。
 
@@ -35,7 +35,7 @@ description: >-
 
 ### 完整流水线
 
-以下任一表述触发完整四步流水线：
+以下任一表述触发完整五步流水线：
 
 - `gerrit pipeline` / `gp` — 执行完整流水线
 - `一键提交` / `一键提交评审` — 提交 + 评审 + Checklist + 飞书通知
@@ -50,7 +50,7 @@ description: >-
 |--------|------|---------|
 | `pipeline submit` / `gerrit submit` / `gerrit push` / `提交到gerrit` / `推送代码` / `提交代码审查` / `推代码` / `提交CR` | Step 1: 代码提交 | 当前仓库有未提交的变更 |
 | `gerrit amend` | Step 1: Amend 追加 patchset | 当前仓库有未提交的变更 + 已有 Change |
-| `gerrit cherry-pick` | Step 1: Cherry-pick 到其他分支 | 目标分支名 + JIRA-ID 确认 |
+| `gerrit cherry-pick` | Step 1: Cherry-pick 到其他分支 | 目标分支名 + Meego 工作项 URL 确认 |
 | `pipeline review <CR编号>` / `评审CR` | Step 2: 代码评审 | CR 编号 |
 | `pipeline checklist <CR编号>` / `贴checklist` | Step 3: 贴 Checklist | CR 编号 |
 | `pipeline notify` / `飞书通知` | Step 4: 飞书通知 | CR 编号、URL、评审结果 |
@@ -70,11 +70,13 @@ Step 3: 合并确认              → 同屏展示 Checklist 预览 + 飞书通�
                               → 用户一次确认后：串行贴 Checklist 到所有 CR
           ↓
 Step 4: 飞书通知              → Checklist 全部成功后发送飞书通知
+          ↓
+Step 5: Meego 同步            → 将 CR 链接、评审结果和 Checklist 状态写入 Meego 工作项评论
 ```
 
 > **v1.9.0 合并说明**：原 Step 3（Checklist 确认贴出）与原 Step 3.5（飞书通知前确认）合并为单一确认屏。执行级仍保持顺序与故障边界：所有 Checklist 贴回成功后才发送飞书；任一 Checklist 贴失败则中止飞书发送并报告部分成功状态。
 
-**四步严格顺序执行**，任一步骤失败则中止流水线并向用户报告。
+**五步严格顺序执行**，任一步骤失败则中止流水线并向用户报告。Step 5 在飞书通知后执行；如 Meego 同步失败，不回滚已发送的飞书通知或已贴出的 Gerrit 评论，但必须在最终报告中明确标记未同步原因。
 
 ### 流水线上下文传递
 
@@ -123,35 +125,36 @@ export GERRIT_HTTP_PASSWORD="{Step 1 已读取的 gerrit.http_password}"
 #### 标题格式
 
 ```
-【类型】【JIRA-ID】概要描述【x/y】
+【类型】【Meego工作项编号】概要描述【x/y】
 ```
 
 - **类型**（必选其一）：`bug` / `change` / `feature`
   - `bug`：缺陷修复
   - `change`：需求变更
   - `feature`：新功能开发
-- **JIRA-ID**：JIRA ticket 编号，用 `【】` 包裹，必须在 JIRA 上真实存在。前缀不做白名单限制，按通用 Jira Key 形态校验：项目 Key 以大写字母开头，可包含大写字母和数字，后接 `-` 与数字编号，例如 `CHYT1V-1058`、`D01-123`
+- **Meego 工作项编号**：由用户确认的 Meego 工作项 URL 解析得到，用 `【】` 包裹；因 Meego ID 格式暂未统一，当前只校验该字段存在且使用中文方括号包裹，不对具体字符形态做强制约束；旧 Jira Key 形态（如 `CHYT1V-1058`、`D01-123`）已全面弃用，不得作为该字段使用
 - **概要描述**：简明扼要说明改动内容
 - **【x/y】**（多仓库关联提交时必填）：关联提交序号标识，x 为当前提交序号，y 为总笔数，均为正整数。`【】` 为中文方括号。非关联提交时省略
 
 **示例**：
 ```
 # 单笔提交（无关联）
-【bug】【CHYT1V-1058】仪表双闪报警灯无提示音
-【feature】【CHYT1V-961】Carproperty 新增车辆属性支持
+【bug】【MEEGO-工单-1058】仪表双闪报警灯无提示音
+【feature】【MEEGO-需求-961】Carproperty 新增车辆属性支持
 
 # 多仓库关联提交（3 笔）
-【change】【CHYT1V-200】登录流程调整为异步模式【1/3】
-【change】【CHYT1V-200】SDK 接口同步更新【2/3】
-【change】【CHYT1V-200】sdk_release 版本更新【3/3】
+【change】【MEEGO-需求-200】登录流程调整为异步模式【1/3】
+【change】【MEEGO-需求-200】SDK 接口同步更新【2/3】
+【change】【MEEGO-需求-200】sdk_release 版本更新【3/3】
 ```
 
 #### Body 必填字段
 
-所有字段均为**必填**，Gerrit 门禁会检查前 4 项的最低字数要求。
+所有字段均为**必填**，Gerrit 门禁会检查 Meego URL 格式和前 4 个说明字段的最低字数要求。`【Meego工作项URL】` 必须作为 body 第一行放在标题下方空行之后，便于 Gerrit 页面直接点击跳转。
 
 | 字段 | 最低字数 | 最高字数 | 说明 |
 |------|---------|---------|------|
+| 【Meego工作项URL】 | — | 300 字 | 用户确认的 Meego 工作项详情页 URL，格式必须为 `https://project.feishu.cn/<project>/<type>/detail/<id>` |
 | 【原因分析】 | 8 字 | 50 字 | 概述故障原因或新需求/变更背景，简明扼要 |
 | 【解决方案】 | 8 字 | 50 字 | 概述改动方案，简明扼要 |
 | 【自测用例】 | 20 字 | 50 字 | 场景 + 操作步骤 + 期望结果 + 实际结果，简明扼要 |
@@ -171,8 +174,9 @@ export GERRIT_HTTP_PASSWORD="{Step 1 已读取的 gerrit.http_password}"
 #### 完整 Commit Message 模板
 
 ```
-【{类型}】【{JIRA-ID}】{概要描述}
+【{类型}】【{Meego工作项编号}】{概要描述}
 
+【Meego工作项URL】{用户确认的 Meego 工作项 URL}
 【原因分析】{至少8字，描述故障原因或需求背景}
 【解决方案】{至少8字，描述改动方案}
 【自测用例】{至少20字，场景+操作步骤+期望结果+实际结果}
@@ -256,17 +260,18 @@ echo "$topic_name" | grep -qE '^[A-Za-z0-9_-]+$' || echo "ERROR: Topic 名称包
 在 commit 之前或之后，检查 commit message 是否符合规范：
 
 1. **标题**：以 `【bug】`、`【change】` 或 `【feature】` 开头
-2. **JIRA-ID**：标题中包含有效的 JIRA ticket 编号，按通用 Jira Key 形态校验，不限制具体项目前缀
-3. **【x/y】标识**（如存在）：x、y 为正整数，x ≤ y，`【】` 为中文方括号
-4. **Body 字段完整性**：确认 4 个门禁必检字段均存在且满足最低字数
+2. **Meego 工作项编号**：标题中包含从 Meego 工作项 URL 解析出的工作项编号，并使用中文方括号包裹；不限制具体 ID 格式；旧 Jira Key 形态已弃用
+3. **Meego 工作项 URL**：body 第一行必须为用户确认的 `【Meego工作项URL】https://project.feishu.cn/...`，用于 Gerrit 页面点击跳转
+4. **【x/y】标识**（如存在）：x、y 为正整数，x ≤ y，`【】` 为中文方括号
+5. **Body 字段完整性**：确认 4 个门禁必检字段均存在且满足最低字数
    - 【原因分析】≥ 8 字
    - 【解决方案】≥ 8 字
    - 【自测用例】≥ 20 字
    - 【自测方法】≥ 4 字
-5. **其他必填字段**：确认【影响范围】【代码修改量】【提交项目/分支】【体现版本】存在
-6. **体现版本格式**：【体现版本】由执行 Agent 自动填入当日日期，格式固定为 `After YYYY/M/D`（如 `After 2026/4/30`），不接受其他格式
-7. **开发自测视频**（可选）：如用户选择添加，确认【开发自测视频】存在且内容为固定值
-8. **严格符合模板**：commit message body 只能包含模板中定义的字段，不得有任何模板外的多余行（如 Co-authored-by、Signed-off-by 等）
+6. **其他必填字段**：确认【影响范围】【代码修改量】【提交项目/分支】【体现版本】存在
+7. **体现版本格式**：【体现版本】由执行 Agent 自动填入当日日期，格式固定为 `After YYYY/M/D`（如 `After 2026/4/30`），不接受其他格式
+8. **开发自测视频**（可选）：如用户选择添加，确认【开发自测视频】存在且内容为固定值
+9. **严格符合模板**：commit message body 只能包含模板中定义的字段，不得有任何模板外的多余行（如 Co-authored-by、Signed-off-by 等）
 
 **强制校验脚本（供执行 Agent 内部调用）**：
 
@@ -352,16 +357,16 @@ git push autolink HEAD:refs/for/{目标分支}%r={reviewer1},r={reviewer2}
 
 当需要将当前提交 cherry-pick 到其他分支时：
 
-##### JIRA-ID 确认（必需步骤，不可跳过）
+##### Meego 工作项 URL 确认（必需步骤，不可跳过）
 
-> **Cherry-pick 前必须通过 `AskUserQuestion` 或等价交互能力向用户确认 JIRA-ID，即使原 commit 中已包含 JIRA-ID 也必须确认。此步骤为强制项，不可跳过。**
+> **Cherry-pick 前必须通过 `AskUserQuestion` 或等价交互能力向用户确认 Meego 工作项 URL，即使原 commit 中已包含 Meego 工作项 URL 也必须确认。此步骤为强制项，不可跳过。**
 
 执行流程：
-1. 读取原 commit message 中的 JIRA-ID
-2. 通过 `AskUserQuestion` 或等价交互能力向用户展示当前 JIRA-ID 并确认：
-   - 选项 1：沿用原 JIRA-ID `【{原JIRA-ID}】`
-   - 选项 2：使用新的 JIRA-ID（用户输入新 ID）
-3. 用户确认后，将最终确定的 JIRA-ID 用于 cherry-pick 后的 commit message
+1. 读取原 commit message 中的 Meego 工作项编号
+2. 通过 `AskUserQuestion` 或等价交互能力向用户展示当前 URL 对应的工作项信息并确认：
+   - 选项 1：沿用原工作项 URL
+   - 选项 2：使用新的工作项 URL（用户输入新 URL）
+3. 用户确认后，将最终确定的工作项 URL 用于 cherry-pick 后的 commit message 解析与飞书 / Meego 同步
 
 ##### 操作步骤
 
@@ -373,8 +378,8 @@ git pull autolink {目标分支}
 # 3. cherry-pick 指定 commit
 git cherry-pick {commit-hash}
 # 4. 如有冲突，解决后 git cherry-pick --continue
-# 5. 如用户选择了新 JIRA-ID，amend commit message 替换 JIRA-ID
-git commit --amend  # 仅在 JIRA-ID 变更时执行
+# 5. 如用户选择了新工作项 URL，amend commit message 后按新 URL 重新解析工作项编号
+git commit --amend  # 仅在工作项 URL 变更并导致标题编号变化时执行
 # 6. 清理运行时自动追加的 forbidden trailer 并强制校验
 python3 <skill_dir>/scripts/commit_msg_guard.py sanitize-head
 # 7. 校验当前 HEAD 基于最新目标分支
@@ -389,7 +394,7 @@ git checkout {原分支}
 - cherry-pick 会生成新的 commit（新 Change-Id），在 Gerrit 上是独立的 Change
 - 如果 cherry-pick 多个 commit，逐个操作并分别推送
 - 冲突解决后需确认 commit message 格式仍符合规范
-- JIRA-ID 确认必须在 cherry-pick 操作之前完成，确保 push 前 commit message 中的 JIRA-ID 正确
+- Meego 工作项 URL 确认必须在 cherry-pick 操作之前完成，确保 push 前 commit message 中的工作项编号可由 URL 正确解析
 
 ### 1.6 Commit Message 强制校验（校验-修正-重试闭环）
 
@@ -433,19 +438,20 @@ git commit --amend（仅修正 message，不改变代码）
 | # | 校验项 | 判定规则 | 失败严重性 |
 |---|--------|---------|-----------|
 | 1 | 标题格式 | 以 `【bug】`、`【change】` 或 `【feature】` 开头 | 阻塞 |
-| 2 | JIRA-ID | 标题中包含有效 JIRA ticket 编号，用 `【】` 包裹，按通用 Jira Key 形态校验，不限制具体项目前缀 | 阻塞 |
-| 3 | 【x/y】标识 | 如存在，x、y 为正整数，x ≤ y，`【】` 为中文方括号 | 阻塞 |
-| 4 | 标题与 body 之间空行 | 标题之后必须有一个空行再接 body | 阻塞 |
-| 5 | 【原因分析】 | 存在且 8~50 字 | 阻塞 |
-| 6 | 【解决方案】 | 存在且 8~50 字 | 阻塞 |
-| 7 | 【自测用例】 | 存在且 20~50 字 | 阻塞 |
-| 8 | 【自测方法】 | 存在且 4~50 字 | 阻塞 |
-| 9 | 【影响范围】 | 存在且 8~50 字 | 阻塞 |
-| 10 | 【代码修改量】 | 存在且 ≤50 字 | 阻塞 |
-| 11 | 【提交项目/分支】 | 存在且 ≤50 字 | 阻塞 |
-| 12 | 【体现版本】 | 存在且格式为 `After YYYY/M/D`（如 `After 2026/5/2`） | 阻塞 |
-| 13 | 【开发自测视频】 | 如存在，内容必须为固定值 | 阻塞 |
-| 14 | 无模板外多余行 | body 中不得有 Co-authored-by、Signed-off-by 等模板外行（Change-Id 行除外） | 阻塞 |
+| 2 | Meego 工作项编号 | 标题中包含由 Meego 工作项 URL 解析出的工作项编号，用 `【】` 包裹；不限制具体 ID 格式；旧 Jira Key 形态已弃用 | 阻塞 |
+| 3 | Meego 工作项 URL | body 第一行是 `【Meego工作项URL】https://project.feishu.cn/...`，可在 Gerrit 页面点击跳转 | 阻塞 |
+| 4 | 【x/y】标识 | 如存在，x、y 为正整数，x ≤ y，`【】` 为中文方括号 | 阻塞 |
+| 5 | 标题与 body 之间空行 | 标题之后必须有一个空行再接 body | 阻塞 |
+| 6 | 【原因分析】 | 存在且 8~50 字 | 阻塞 |
+| 7 | 【解决方案】 | 存在且 8~50 字 | 阻塞 |
+| 8 | 【自测用例】 | 存在且 20~50 字 | 阻塞 |
+| 9 | 【自测方法】 | 存在且 4~50 字 | 阻塞 |
+| 10 | 【影响范围】 | 存在且 8~50 字 | 阻塞 |
+| 11 | 【代码修改量】 | 存在且 ≤50 字 | 阻塞 |
+| 12 | 【提交项目/分支】 | 存在且 ≤50 字 | 阻塞 |
+| 13 | 【体现版本】 | 存在且格式为 `After YYYY/M/D`（如 `After 2026/5/2`） | 阻塞 |
+| 14 | 【开发自测视频】 | 如存在，内容必须为固定值 | 阻塞 |
+| 15 | 无模板外多余行 | body 中不得有 Co-authored-by、Signed-off-by 等模板外行（Change-Id 行除外） | 阻塞 |
 | 15 | 字段顺序 | body 各字段必须按模板定义的顺序排列 | 阻塞 |
 
 #### 自动修正规则
@@ -480,7 +486,7 @@ git commit --amend（仅修正 message，不改变代码）
 
 ### 1.7 交互式辅助流程
 
-> **v1.9.0 交互精简**：本节按"推断优先 + 批量弹窗 + 合并确认"重排。在 Claude Code 中可用 `AskUserQuestion` 将原 9 次以上弹窗压缩到 3-4 屏；其他 Agent 可分多轮提问实现，但不得省略安全红线（JIRA-ID 强制确认 / commit message 最终确认 / Checklist 模板固化 / 责任声明）。
+> **v1.9.0 交互精简**：本节按"推断优先 + 批量弹窗 + 合并确认"重排。在 Claude Code 中可用 `AskUserQuestion` 将原 9 次以上弹窗压缩到 3-4 屏；其他 Agent 可分多轮提问实现，但不得省略安全红线（Meego 工作项 URL 强制确认 / commit message 最终确认 / Checklist 模板固化 / 责任声明）。
 
 当用户触发提交流程时，执行 Agent 按以下步骤辅助。先确认提交模式，再根据模式进入对应路径。
 
@@ -615,15 +621,16 @@ git status --porcelain
 | 字段 | 来源 / 默认值 | 备注 |
 |------|--------------|------|
 | **项目**（多项目时） | 配置 `projects` 列表 | 只配置 1 个项目时**自动选中**，本字段不再询问，把名额留给其他 |
-| **JIRA-ID**（必需，不可跳过） | 用户输入（可从当前分支名 / 上一笔 commit 推断为推荐项） | v1.8.0 红线 |
+  | **Meego 工作项 URL**（必需，不可跳过） | 用户输入（可从当前分支名 / 上一笔 commit 推断为推荐项） | v1.8.0 红线 |
 | **提交类型** | bug / change / feature | 三选一 |
 | **目标分支** | 默认从当前分支推断为推荐项 | 用户可改 |
 
-> Claude Code 中因 `AskUserQuestion` 单屏最多 4 题，超出时（如多项目场景）按"项目 + JIRA + 类型 + 分支"优先级取前 4 项；【开发自测视频】合并到 Screen 2 选项中。其他 Agent 即使可一次收集更多字段，也应保持相同字段优先级和最终确认语义。
+> Claude Code 中因 `AskUserQuestion` 单屏最多 4 题，超出时（如多项目场景）按"项目 + Meego URL + 类型 + 分支"优先级取前 4 项；【开发自测视频】合并到 Screen 2 选项中。其他 Agent 即使可一次收集更多字段，也应保持相同字段优先级和最终确认语义。
 
 **自动生成 Commit Message**（无用户交互）：
 1. 分析 `git diff --staged` 的内容
-2. 生成各必填字段内容（原因分析、解决方案等）
+2. 将用户确认的 Meego 工作项 URL 写入标题下方空行后的 `【Meego工作项URL】` 字段
+3. 生成各必填字段内容（原因分析、解决方案等）
 3. 估算代码修改量
 4. 填充提交分支和体现版本
 
@@ -656,14 +663,14 @@ git status --porcelain
 | 字段 | 来源 / 默认值 | 备注 |
 |------|--------------|------|
 | **项目**（多项目时） | 配置 `projects` | 只 1 个项目时自动选中 |
-| **JIRA-ID**（必需，不可跳过） | 用户输入 | v1.8.0 红线 |
+| **Meego 工作项 URL**（必需，不可跳过） | 用户输入 | v1.8.0 红线 |
 | **提交类型** | bug / change / feature | 所有仓库共享 |
 | **目标分支** | 默认从当前分支推断为推荐项 | 所有仓库共享 |
 
-> Topic 名称采用**自动建议**（格式 `{模块名/项目名}_{JIRA-ID}_{YYYYMMDD}`），不再单独询问，挪到 Screen 3 中可修改。
+> Topic 名称采用**自动建议**（格式 `{模块名/项目名}_{Meego工作项编号}_{YYYYMMDD}`），不再单独询问，挪到 Screen 3 中可修改。
 
 **自动生成所有仓库 Commit Message**（无用户交互）：
-1. 所有仓库共享基础信息（类型、JIRA-ID、概要描述、body 各字段）
+1. 所有仓库共享基础信息（类型、从 Meego 工作项 URL 解析出的工作项编号、概要描述、body 各字段）
 2. 每个仓库标题末尾自动追加对应 `【x/y】` 标识
 3. 各仓库 body 字段根据各自的 diff 内容分别生成
 4. 自动计算提交顺序（涉及 APK 的 sdk_release 仓库自动排到最后）
@@ -716,12 +723,12 @@ repo forall -c 'if [ -n "$(git status --porcelain)" ]; then echo "$(pwd)"; fi'
 > 在已有 Change 上追加修改，保留原 Change-Id，Gerrit 自动关联为新 patchset。完整流水线中 amend 完成后继续执行 Step 2 → 3 → 4。
 
 **信息收集**（通过 `AskUserQuestion` 或等价交互能力）：
-1. **JIRA-ID**（必需步骤，不可跳过）：读取当前 HEAD commit message 中的 JIRA-ID，通过结构化确认向用户确认沿用或更换
+1. **Meego 工作项 URL**（必需步骤，不可跳过）：读取当前 HEAD commit message 中的工作项编号，通过结构化确认向用户确认沿用或更换对应 URL
 2. 目标分支（从当前分支推断或询问）
 
 **执行流程**：
 1. `git add` 暂存变更文件
-2. `git commit --amend`（保留原 Change-Id；如 JIRA-ID 变更则同步修改 commit message）
+2. `git commit --amend`（保留原 Change-Id；如工作项 URL 变更则同步修改 commit message 并重新解析编号）
 3. 强制校验 commit message（1.6 节）
 4. 执行 `python3 <skill_dir>/scripts/base_branch_guard.py --branch {目标分支}`，确认当前 `HEAD` 基于最新 `autolink/{目标分支}`
 5. `git push autolink HEAD:refs/for/{目标分支}%r={reviewer1},r={reviewer2}`
@@ -738,7 +745,7 @@ repo forall -c 'if [ -n "$(git status --porcelain)" ]; then echo "$(pwd)"; fi'
 > 将已有 commit cherry-pick 到其他分支。完整流水线中 cherry-pick 完成后继续执行 Step 2 → 3 → 4。
 
 **信息收集**（通过 `AskUserQuestion` 或等价交互能力）：
-1. **JIRA-ID 确认**（必需步骤，不可跳过）：读取原 commit 的 JIRA-ID，询问沿用或更换
+1. **Meego 工作项 URL 确认**（必需步骤，不可跳过）：读取原 commit 的工作项编号，询问沿用或更换对应 URL
 2. 目标分支
 
 **执行流程**：按 1.5 节 Cherry-pick 操作步骤执行。
@@ -913,6 +920,8 @@ cd <skill_dir>/scripts && python3 gerrit_post_review.py \
 
 **禁止**：简化、截断或仅贴部分评审结论。
 
+`gerrit_post_review.py` 在贴回评审结论时会自动在末尾加一条 `---` 分割线，再追加 `Powered by gerrit-pipeline v<skill.json version>`；执行 Agent 不需要手工添加该行。
+
 #### 多仓库关联提交场景
 
 对 Step 1 产出的每个 CR，均需独立执行本校验。任一 CR 的评审结论未能贴回，视为该 CR 的 Step 2 未完成。
@@ -1058,7 +1067,7 @@ cd <skill_dir>/scripts && python3 gerrit_post_checklist.py \
   --checklist-text "<Checklist 内容>"
 ```
 
-执行 Agent 先将填好的 Checklist 写入临时文件，再调用脚本贴到 Gerrit。
+执行 Agent 先将填好的 Checklist 写入临时文件，再调用脚本贴到 Gerrit。`gerrit_post_checklist.py` 会自动在末尾加一条 `---` 分割线，再追加 `Powered by gerrit-pipeline v<skill.json version>`；执行 Agent 不需要手工添加该行。
 
 #### 2. 发送飞书通知
 
@@ -1228,8 +1237,9 @@ python3 pipeline_config.py remove-project --name "D01"
 cd <skill_dir>/scripts && python3 feishu_notify.py \
   --cr <CR编号> \
   --url "<Gerrit Change URL>" \
-  --branch <���标分支> \
+  --branch <目标分支> \
   --subject "<提交标题>" \
+  --work-item-url "<Meego工作项URL>" \
   --project "<项目名称>" \
   --score <评审评分> \
   --p0 <P0数> --p1 <P1数> --p2 <P2数> --p3 <P3数> \
@@ -1242,6 +1252,7 @@ cd <skill_dir>/scripts && python3 feishu_notify.py \
   --url "<URL1>,<URL2>,..." \
   --branch <目标分支> \
   --subject "<提交标题>" \
+  --work-item-url "<Meego工作项URL>" \
   --project "<项目名称>" \
   --score <最低评审评分> \
   --p0 <P0总数> --p1 <P1总数> --p2 <P2总数> --p3 <P3总数> \
@@ -1260,6 +1271,8 @@ cd <skill_dir>/scripts && python3 feishu_notify.py \
 | `--url` | 是 | Gerrit Change URL | Step 1 输出 |
 | `--branch` | 否 | 目标分支（默认 al_dev） | Step 1 输出 |
 | `--subject` | 是 | 提交标题，必须与 commit message 第一行完全一致，不得改写、压缩或替换为概要描述 | Step 1 输出 |
+| `--work-item-url` | 是 | 用户确认的 Meego 工作项详情页 URL；脚本会从 URL 解析项目 key、工作项类型和工作项编号，并在飞书卡片中渲染为可点击入口 | Step 1 输出 |
+| `--work-item-id` | 否 | 兼容旧流程的工作项编号；只用于文本兜底，不提供 API 上下文或可点击链接 | Step 1 输出 |
 | `--score` | 否 | 评审评分 -1/0/1（默认 1） | Step 2 输出 |
 | `--p0` ~ `--p3` | 否 | 各级别问题数（默认 0） | Step 2 输出 |
 | `--checklist` | 否 | Checklist 状态 pass/warn/fail（默认 pass） | Step 3 输出 |
@@ -1318,7 +1331,7 @@ cd <skill_dir>/scripts && python3 feishu_notify.py \
 **projects 匹配规则**：
 - `projects` 为可选字段，不配置时所有项目使用顶层默认配置（向后兼容）
 - key 为项目名称（如 `D01`、`BAIC`），由用户在 Step 1 交互时选择
-- value 中的 `gerrit` 和 `feishu` 字段**覆盖**顶层对应字段，未配置的字段 fallback 到顶层
+- value 中的 `gerrit` 和 `feishu` 字段**覆盖**顶层对应字段，未配置的字段 fallback 到顶层；Meego 工作项上下文从用户提供的 URL 解析，不需要项目内配置
 - 同一仓库可属于多个项目，每次提交时由用户选择当前所属项目
 - 只有一个项目时自动选中，无 `projects` 配置时跳过选择
 
@@ -1347,6 +1360,7 @@ python3 pipeline_config.py remove-project --name "D01"
 
 - **标题**：Gerrit Pipeline 通知（颜色随评审结果变化：绿/橙/红）
 - **提交概要**：以链接形式展示，点击跳转到 Gerrit Change URL；显示文本必须与 commit message 第一行完全一致
+- **Meego 工作项**：以链接形式展示；优先使用 `--work-item-url` 渲染可点击链接，缺少 URL 时才回退到标题或兼容参数中的工作项编号
 - **CR 编号** + **分支**
 - **提交人** + **提交日期**
 - **评审评分** + **问题统计**
@@ -1359,6 +1373,7 @@ python3 pipeline_config.py remove-project --name "D01"
 
 - **标题**：Gerrit Pipeline 通知 — 关联提交（颜色随最低评审评分变化）
 - **提交概要**：以链接形式展示，点击跳转到 Gerrit Topic 搜索页；显示文本必须来自 Step 1 传入的 commit message 标题，不得改写为概要描述
+- **Meego 工作项**：以链接形式展示；多仓关联提交默认共享同一个 Meego 工作项
 - **Topic** + **分支**
 - **提交人** + **提交日期**
 - **评审评分** + **问题统计**
@@ -1375,6 +1390,8 @@ python3 pipeline_config.py remove-project --name "D01"
 - `contact:user.base:readonly` — 查询用户 open_id
 
 机器人需已加入目标飞书群。
+
+---
 
 ### 独立操作
 
@@ -1412,6 +1429,64 @@ python3 <skill_dir>/scripts/telemetry_client.py \
 
 ---
 
+## Step 5：Meego 同步
+
+Step 5 在 Step 4 飞书通知发送完成后执行，将本次 CR 结果写入对应 Meego 工作项评论。该步骤不等待 CR merge。
+
+### 执行方式
+
+```bash
+# 单仓库提交
+cd <skill_dir>/scripts && python3 meego_client.py sync \
+  --cr <CR编号> \
+  --url "<Gerrit Change URL>" \
+  --branch <目标分支> \
+  --subject "<提交标题>" \
+  --work-item-url "<Meego工作项URL>" \
+  --project "<项目名称>" \
+  --score <评审评分> \
+  --p0 <P0数> --p1 <P1数> --p2 <P2数> --p3 <P3数> \
+  --checklist <pass|warn|fail>
+
+# 多仓库关联提交
+cd <skill_dir>/scripts && python3 meego_client.py sync \
+  --topic <Topic名称> \
+  --cr <CR编号1>,<CR编号2>,... \
+  --url "<URL1>,<URL2>,..." \
+  --repos "<repo1>,<repo2>,..." \
+  --branch <目标分支> \
+  --subject "<提交标题>" \
+  --work-item-url "<Meego工作项URL>" \
+  --project "<项目名称>" \
+  --score <最低评审评分> \
+  --p0 <P0总数> --p1 <P1总数> --p2 <P2总数> --p3 <P3总数> \
+  --checklist <pass|warn|fail>
+```
+
+### 同步内容
+
+默认写入一条 Meego 评论，包含：
+
+- Gerrit CR 链接
+- 提交标题
+- 目标分支
+- 评审评分
+- P0/P1/P2/P3 问题统计
+- Checklist 状态
+- Topic 与仓库列表（多仓时）
+- `---`
+- `Powered by gerrit-pipeline v<skill.json version>`
+- `Sync ID: gerrit-pipeline:<work_item_id>:<cr>`
+
+### 故障边界
+
+- Step 5 使用 skill 内置 Meego OpenAPI plugin 凭证和管理员 `user_key`；执行 Agent 必须传入用户确认的 `--work-item-url`。URL 无法解析、凭证权限不足或接口失败时，必须向用户报告未同步原因
+- Step 5 失败不回滚 Step 4 已发送的飞书通知，也不回滚 Step 2/3 已贴出的 Gerrit 评论
+- 完整流水线最终报告必须展示 Step 5 成功或失败状态
+- `pipeline notify` 独立操作只执行 Step 4，不自动执行 Step 5；如需补同步，用户应显式触发 Meego 同步命令
+
+---
+
 ## Checklist 模板
 
 以下为固化的 AutoLink Code Review Checklist v2.1 模板。**此模板不可变更**，执行 Agent 必须严格按照以下模板输出，不得增删、修改任何检查项、分类、标题、说明文字或格式结构：
@@ -1425,16 +1500,16 @@ python3 <skill_dir>/scripts/telemetry_client.py \
 ---
 
 #### 📎 流程合规
-- [✓] **任务关联**：填写有效的JIRA任务或BUG编号，非关联任务不能反复用同一个JIRA单
+- [✓] **任务关联**：填写有效的 Meego 工单或工作项 ID，非关联任务不能反复用同一个 Meego 工作项
 - [✓] **分支关联**：需要提交的分支（如release分支）都已Cherry pick（若有）
 - [o] **提交关联**：拉齐有关联或依赖的相关方代码提交，并关联了同一个Topic（若有）
 - [✓] **代码影响**：涉及共享代码/公共模块/平台化组件时，已说明影响项目和验证范围（若有）
 
 #### 🧪 测试验证
-- [✓] **功能测试**：预期功能或问题缺陷的测试验证通过，测试报告已提交到Jira单
-- [✓] **回归测试**：最小自测清单测试验证通过，测试报告已提交到Jira单
-- [✓] **集成测试**：全量的接口集成测试验证通过，测试报告已提交到Jira单（可选）
-- [o] **单元测试**：覆盖率满足该模块测试等级要求且测试通过，测试报告已提交到Jira单（可选）
+- [✓] **功能测试**：预期功能或问题缺陷的测试验证通过，测试报告已提交到 Meego 工作项
+- [✓] **回归测试**：最小自测清单测试验证通过，测试报告已提交到 Meego 工作项
+- [✓] **集成测试**：全量的接口集成测试验证通过，测试报告已提交到 Meego 工作项（可选）
+- [o] **单元测试**：覆盖率满足该模块测试等级要求且测试通过，测试报告已提交到 Meego 工作项（可选）
 
 #### 🧱 平台化
 - [✓] **接口定义**：对外接口定义简洁明了，且可跨项目、跨平台复用，文档更新匹配（若有）
@@ -1453,7 +1528,7 @@ python3 <skill_dir>/scripts/telemetry_client.py \
 - [ ] ❌ **Request Changes**（需修改后重新提交）
 ```
 
-> **执行 Agent 必须严格按上述模板原样输出（含预填的 `✓` / `o` 状态标记），不得修改任何文字或重新判定状态。** 如人工 reviewer 在 Gerrit 上需要调整某项状态，由 reviewer 自行修改。
+> **执行 Agent 必须严格按上述模板原样输出（含预填的 `✓` / `o` 状态标记），不得修改任何文字或重新判定状态。** `gerrit_post_checklist.py` 只会在贴回前自动追加带分割线的 gerrit-pipeline 版本页脚。如人工 reviewer 在 Gerrit 上需要调整某项状态，由 reviewer 自行修改。
 
 ---
 
@@ -1509,13 +1584,17 @@ python3 <skill_dir>/scripts/telemetry_client.py --run-id "$RUN_ID" --step-start 
 # Step 4: notify
 python3 <skill_dir>/scripts/telemetry_client.py --run-id "$RUN_ID" --step-finish notify
 
+python3 <skill_dir>/scripts/telemetry_client.py --run-id "$RUN_ID" --step-start meego_sync
+# Step 5: meego_sync
+python3 <skill_dir>/scripts/telemetry_client.py --run-id "$RUN_ID" --step-finish meego_sync
+
 python3 <skill_dir>/scripts/telemetry_client.py \
   --background \
   --run-id "$RUN_ID" \
   --event-type pipeline_done \
   --mode full_pipeline \
   --entry-mode submit \
-  --steps submit,review,checklist,notify \
+  --steps submit,review,checklist,notify,meego_sync \
   --is-full-pipeline true \
   --agent codex \
   --success true \
@@ -1524,9 +1603,9 @@ python3 <skill_dir>/scripts/telemetry_client.py \
 
 失败场景必须传入 `--success false` 和稳定的 `--error-code`，例如：
 `step1_submit_failed`、`step2_review_failed`、`step3_checklist_failed`、
-`step4_notify_failed`；同时建议传入 `--failure-stage`，如 `submit`、
-`review`、`checklist` 或 `notify`。独立操作使用 `--mode single_step`，
-并用 `--entry-mode` 与 `--steps` 记录真实入口和执行步骤；多步但未完整执行四步时使用 `--mode partial_pipeline`。
+`step4_notify_failed`、`step5_meego_sync_failed`；同时建议传入 `--failure-stage`，如 `submit`、
+`review`、`checklist`、`notify` 或 `meego_sync`。独立操作使用 `--mode single_step`，
+并用 `--entry-mode` 与 `--steps` 记录真实入口和执行步骤；多步但未完整执行五步时使用 `--mode partial_pipeline`。
 
 #### 独立操作 telemetry 强制收尾
 
@@ -1594,7 +1673,7 @@ Run context 只用于跨 shell 记录本次流程的真实步骤和耗时，不�
 | `steps` / `is_full_pipeline` | 按真实顺序记录的步骤列表，以及是否完成全流程 |
 | `success` / `error_code` / `failure_stage` | 执行结果、失败分类与失败阶段 |
 | `duration_s` / `repo_count` | 总耗时（秒）与涉及仓库数量 |
-| `submit_duration_s` / `review_duration_s` / `checklist_duration_s` / `notify_duration_s` | 各步骤耗时（秒） |
+| `submit_duration_s` / `review_duration_s` / `checklist_duration_s` / `notify_duration_s` / `meego_sync_duration_s` | 各步骤耗时（秒） |
 | `step_trace` | 完整步骤轨迹 JSON 字符串，保留开始/结束时间和每步秒级耗时 |
 | `submitter_name` / `agent` / `agent_source` / `install_id` | 提交人、运行时、运行时来源和安装标识 |
 | `run_id` | 本次流程上下文 id，用于跨 shell 记录耗时 |
@@ -1606,7 +1685,7 @@ Run context 只用于跨 shell 记录本次流程的真实步骤和耗时，不�
 
 ## 流水线完成报告
 
-四步全部完成后，向用户输出简报。
+五步全部完成后，向用户输出简报。
 
 ### 单仓库提交
 
@@ -1619,6 +1698,7 @@ Run context 只用于跨 shell 记录本次流程的真实步骤和耗时，不�
 | Step 2: 代码评审 | ✅ | 评分: +1，P0=0 P1=0 P2=0 P3=1 |
 | Step 3: Checklist | ✅ | 已贴到 Gerrit |
 | Step 4: 飞书通知 | ✅ | 已发送到群 |
+| Step 5: Meego 同步 | ✅ | 已写入工作项评论 |
 
 🔗 Gerrit Change: <URL>
 ```
@@ -1642,20 +1722,21 @@ Run context 只用于跨 shell 记录本次流程的真实步骤和耗时，不�
 | Step 2: 代码评审 | ✅ 最低评分: +1 |
 | Step 3: Checklist | ✅ 已贴到 Gerrit |
 | Step 4: 飞书通知 | ✅ 已发送到群 |
+| Step 5: Meego 同步 | ✅ 已写入工作项评论 |
 ```
 
 ---
 
 ## 注意事项
 
-1. **顺序不可调换**：完整流水线必须按 Step 1 → 2 → 3 → 4 顺序执行；v1.9.0 起 Step 3 吞并的是原 Step 3.5 的确认 UI，不是 Step 4 的执行职责
+1. **顺序不可调换**：完整流水线必须按 Step 1 → 2 → 3 → 4 → 5 顺序执行；v1.9.0 起 Step 3 吞并的是原 Step 3.5 的确认 UI，不是 Step 4 的执行职责
 2. **CR 编号传递**：Step 1 的输出是后续所有步骤的输入，务必正确提取
 3. **Self-review 限制**：Gerrit 禁止对自己的 CR 打分，评审评论会以不带 Code-Review label 的方式贴出
 4. **Checklist 模板固化**：执行 Agent 按模板原样输出预填状态，不得依据评审结果自动改写；人工 reviewer 如需调整，可在 Gerrit 上修改
-5. **失败中止**：Step 1 失败则整个流水线中止；Step 2 失败不影响进入 Step 3；Step 3 任一 Checklist 贴回失败则中止 Step 4；Step 4 失败不回滚已完成的 Checklist
-6. **飞书通知**：Step 4 使用内置公共飞书应用，无需额外配置凭证
+5. **失败中止**：Step 1 失败则整个流水线中止；Step 2 失败不影响进入 Step 3；Step 3 任一 Checklist 贴回失败则中止 Step 4；Step 4 失败不回滚已完成的 Checklist；Step 5 失败不回滚 Step 4
+6. **飞书通知**：Step 4 使用内置公共飞书应用，无需额外配置凭证；卡片中只增加 Meego 链接，不改 Gerrit 标题链接行为
 7. **独立操作**：每步可单独触发，执行 Agent 会收集缺少的必要信息
-8. **外部依赖**：Step 2（代码评审）依赖 enhanced_code_review skill，需同步安装；Step 1/3/4 为内置能力，无外部依赖
+8. **外部依赖**：Step 2（代码评审）依赖 enhanced_code_review skill，需同步安装；Step 5 使用 skill 内置 Meego OpenAPI 凭证，用户只需提供工作项 URL；Step 1/3/4 为内置能力
 
 ---
 
@@ -1676,12 +1757,13 @@ python3 -m py_compile \
   gerrit-pipeline/scripts/feishu_notify.py \
   gerrit-pipeline/scripts/gerrit_post_checklist.py \
   gerrit-pipeline/scripts/gerrit_post_review.py \
+  gerrit-pipeline/scripts/meego_client.py \
   gerrit-pipeline/scripts/pipeline_config.py \
   gerrit-pipeline/scripts/telemetry_client.py
 
 mkdir -p release
 find release -mindepth 1 -maxdepth 1 -type f -delete
-zip -q release/gerrit-pipeline-v2.0.3.zip \
+zip -q release/gerrit-pipeline-v2.1.0.zip \
   gerrit-pipeline/README.md \
   gerrit-pipeline/SKILL.md \
   gerrit-pipeline/skill.json \
@@ -1691,6 +1773,7 @@ zip -q release/gerrit-pipeline-v2.0.3.zip \
   gerrit-pipeline/scripts/commit_msg_guard.py \
   gerrit-pipeline/scripts/pipeline_config.py \
   gerrit-pipeline/scripts/feishu_notify.py \
+  gerrit-pipeline/scripts/meego_client.py \
   gerrit-pipeline/scripts/gerrit_post_review.py \
   gerrit-pipeline/scripts/gerrit_post_checklist.py \
   gerrit-pipeline/scripts/telemetry_client.py \
@@ -1707,28 +1790,30 @@ zip -q release/telemetry-gateway-v2.0.3.zip \
   telemetry-gateway/scripts/stop.sh \
   telemetry-gateway/systemd/telemetry-gateway.service
 
-unzip -l release/gerrit-pipeline-v2.0.3.zip
-unzip -l release/gerrit-pipeline-v2.0.3.zip | grep -F "gerrit-pipeline/references/full-spec.md"
-unzip -l release/gerrit-pipeline-v2.0.3.zip | grep -F "gerrit-pipeline/scripts/base_branch_guard.py"
-unzip -l release/gerrit-pipeline-v2.0.3.zip | grep -F "gerrit-pipeline/scripts/commit_msg_guard.py"
-unzip -l release/gerrit-pipeline-v2.0.3.zip | grep -F "gerrit-pipeline/scripts/telemetry_client.py"
-unzip -l release/gerrit-pipeline-v2.0.3.zip | grep -F "gerrit-pipeline/scripts/telemetry_defaults.json"
-unzip -p release/gerrit-pipeline-v2.0.3.zip gerrit-pipeline/scripts/telemetry_defaults.json | grep -F '"key_id": "gerrit-pipeline-v2.0.3"'
+unzip -l release/gerrit-pipeline-v2.1.0.zip
+unzip -l release/gerrit-pipeline-v2.1.0.zip | grep -F "gerrit-pipeline/references/full-spec.md"
+unzip -l release/gerrit-pipeline-v2.1.0.zip | grep -F "gerrit-pipeline/scripts/base_branch_guard.py"
+unzip -l release/gerrit-pipeline-v2.1.0.zip | grep -F "gerrit-pipeline/scripts/commit_msg_guard.py"
+unzip -l release/gerrit-pipeline-v2.1.0.zip | grep -F "gerrit-pipeline/scripts/meego_client.py"
+unzip -l release/gerrit-pipeline-v2.1.0.zip | grep -F "gerrit-pipeline/scripts/telemetry_client.py"
+unzip -l release/gerrit-pipeline-v2.1.0.zip | grep -F "gerrit-pipeline/scripts/telemetry_defaults.json"
+unzip -p release/gerrit-pipeline-v2.1.0.zip gerrit-pipeline/scripts/telemetry_defaults.json | grep -F '"key_id": "gerrit-pipeline-v2.1.0"'
 unzip -l release/telemetry-gateway-v2.0.3.zip
 unzip -l release/telemetry-gateway-v2.0.3.zip | grep -F "telemetry-gateway/scripts/status.sh"
 unzip -l release/telemetry-gateway-v2.0.3.zip | grep -F "telemetry-gateway/scripts/restart.sh"
-unzip -p release/telemetry-gateway-v2.0.3.zip telemetry-gateway/app.py | grep -F 'TelemetryGateway/2.0.3'
+unzip -p release/telemetry-gateway-v2.0.3.zip telemetry-gateway/app.py | grep -F 'GATEWAY_VERSION = "2.0.3"'
 unzip -p release/telemetry-gateway-v2.0.3.zip telemetry-gateway/app.py | grep -F '"/version"'
 unzip -p release/telemetry-gateway-v2.0.3.zip telemetry-gateway/scripts/status.sh | grep -F '/version'
 unzip -p release/telemetry-gateway-v2.0.3.zip telemetry-gateway/.env.example | grep -F 'gerrit-pipeline-v2.0.0'
 unzip -p release/telemetry-gateway-v2.0.3.zip telemetry-gateway/.env.example | grep -F 'gerrit-pipeline-v2.0.1'
 unzip -p release/telemetry-gateway-v2.0.3.zip telemetry-gateway/.env.example | grep -F 'gerrit-pipeline-v2.0.2'
 unzip -p release/telemetry-gateway-v2.0.3.zip telemetry-gateway/.env.example | grep -F 'gerrit-pipeline-v2.0.3'
-sha256sum release/gerrit-pipeline-v2.0.3.zip release/telemetry-gateway-v2.0.3.zip
+unzip -p release/telemetry-gateway-v2.0.3.zip telemetry-gateway/.env.example | grep -F 'gerrit-pipeline-v2.1.0'
+sha256sum release/gerrit-pipeline-v2.1.0.zip release/telemetry-gateway-v2.0.3.zip
 
 git status --short
 git add -A
-git commit -m "release: gerrit-pipeline v2.0.3"
+git commit -m "release: gerrit-pipeline v2.1.0"
 git push origin "$(git branch --show-current)"
 ```
 
@@ -1745,6 +1830,7 @@ python3 -m py_compile \
   gerrit-pipeline/scripts/feishu_notify.py \
   gerrit-pipeline/scripts/gerrit_post_checklist.py \
   gerrit-pipeline/scripts/gerrit_post_review.py \
+  gerrit-pipeline/scripts/meego_client.py \
   gerrit-pipeline/scripts/pipeline_config.py \
   gerrit-pipeline/scripts/telemetry_client.py
 
@@ -1759,17 +1845,18 @@ TARBALL="$(bash ~/.openclaw/workspace/skills/skillpack-client/scripts/pack-skill
 tar -tzf "$TARBALL" | grep -F "references/full-spec.md"
 tar -tzf "$TARBALL" | grep -F "scripts/base_branch_guard.py"
 tar -tzf "$TARBALL" | grep -F "scripts/commit_msg_guard.py"
+tar -tzf "$TARBALL" | grep -F "scripts/meego_client.py"
 tar -tzf "$TARBALL" | grep -F "scripts/telemetry_client.py"
 tar -tzf "$TARBALL" | grep -F "scripts/telemetry_defaults.json"
 
 # 正式发布：wrapper 会依次执行 telemetry pre、SkillPack lint、publish、telemetry post
 bash ~/.openclaw/workspace/skills/skillpack-client/scripts/publish-with-telemetry.sh \
   gerrit-pipeline \
-  --changelog "gerrit-pipeline v2.0.3"
+  --changelog "gerrit-pipeline v2.1.0"
 
 git status --short
 git add -A
-git commit -m "release: gerrit-pipeline v2.0.3"
+git commit -m "release: gerrit-pipeline v2.1.0"
 git push origin "$(git branch --show-current)"
 ```
 
@@ -1778,6 +1865,26 @@ git push origin "$(git branch --show-current)"
 ---
 
 ## 版本历史
+
+### v2.1.0（2026/7/23）
+
+1. **Meego URL 入口**：用户提供 Meego 工作项 URL，脚本从 URL 解析项目 key、工作项类型和工作项编号，commit message 标题继续写入解析后的编号，并在标题下方 body 首行追加完整 URL 方便 Gerrit 页面点击跳转
+2. **飞书卡片链接**：Step 4 通知卡片新增可点击的 Meego 工作项入口，单仓和多仓 topic 通知均支持
+3. **Meego 同步闭环**：新增 Step 5，在飞书通知后将 CR 链接、评审结果、Checklist 状态和问题统计回写到工作项评论，失败不回滚 Step 4
+4. **凭证内置**：Meego OpenAPI plugin 凭证和管理员 `user_key` 随 skill 内置，用户无需在 `config.json` 配置 Meego 密钥、用户标识、项目 key 或接口地址
+5. **Telemetry key 轮换**：客户端默认 `key_id` 与内置 HMAC secret 轮换到 `gerrit-pipeline-v2.1.0`；Gateway 保留 `2.0.x` 兼容 key，同时新增 `gerrit-pipeline-v2.1.0` 为默认接收 key
+
+### v2.0.5（2026/7/21）
+
+1. **Meego 同步闭环**：新增 Step 5，通过 `meego_client.py` 将 CR 结果回写到对应 Meego 工作项评论
+2. **通知入口增强**：飞书通知卡片展示 Meego 工作项入口，便于从通知直接定位到工作项
+3. **品牌页脚统一**：评审结论、Checklist 和 Meego 评论统一追加 `Powered by gerrit-pipeline v<skill.json version>`，保留版本痕迹
+
+### v2.0.4（2026/7/17）
+
+1. **Meego 工单切换**：提交规范、交互红线、Topic 建议和 Checklist 文案从 `JIRA-ID` 切换为 Meego 工单 ID/工作项 ID
+2. **旧 Jira ID 弃用**：旧 Jira Key 形态（如 `CHYT1V-1058`、`D01-123`）不再作为合法任务关联字段接受
+3. **格式校验收敛**：因 Meego ID 格式暂未统一，`commit_msg_guard.py` 仅校验工作项字段存在并使用中文方括号包裹，不对具体字符形态做强制约束
 
 ### v2.0.3（2026/7/3）
 
@@ -1853,7 +1960,7 @@ git push origin "$(git branch --show-current)"
 
 1. **Agent Neutral 通用性**：新增运行时兼容模型，明确 Claude Code 是推荐运行时，其他 Agent 可通过等价交互能力和脚本调用兼容执行
 2. **保留 Claude Code 优势**：斜杠命令、`AskUserQuestion`、multiSelect、Skill tool 调用作为 Claude Code 优化路径保留，不削弱现有使用体验
-3. **交互抽象统一**：将 JIRA 确认、项目选择、Checklist 责任声明等步骤从 Claude 专属表述调整为 `AskUserQuestion` 或等价交互能力，安全红线不变
+3. **交互抽象统一**：将 Meego 工作项 URL 确认、项目选择、Checklist 责任声明等步骤从 Claude 专属表述调整为 `AskUserQuestion` 或等价交互能力，安全红线不变
 
 ### v1.9.0（2026/5/21）
 

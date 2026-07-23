@@ -15,7 +15,7 @@ from pathlib import Path
 os.environ.update(
     {
         "TELEMETRY_ADMIN_TOKEN": "admin-token",
-        "TELEMETRY_HMAC_KEYS": '{"gerrit-pipeline-v2.0.0":"legacy-test-secret","gerrit-pipeline-v2.0.1":"legacy-test-secret","gerrit-pipeline-v2.0.2":"legacy-test-secret","gerrit-pipeline-v2.0.3":"test-secret"}',
+        "TELEMETRY_HMAC_KEYS": '{"gerrit-pipeline-v2.0.0":"legacy-test-secret","gerrit-pipeline-v2.0.1":"legacy-test-secret","gerrit-pipeline-v2.0.2":"legacy-test-secret","gerrit-pipeline-v2.0.3":"test-secret","gerrit-pipeline-v2.1.0":"new-test-secret"}',
         "TELEMETRY_REVOKED_KEY_IDS": "",
         "TELEMETRY_DRY_RUN": "true",
         "TELEMETRY_FIELD_MAP": "",
@@ -68,6 +68,7 @@ class TelemetryGatewayTest(unittest.TestCase):
             "gerrit-pipeline-v2.0.1": "legacy-test-secret",
             "gerrit-pipeline-v2.0.2": "legacy-test-secret",
             "gerrit-pipeline-v2.0.3": "test-secret",
+            "gerrit-pipeline-v2.1.0": "new-test-secret",
         }
         app.Config.revoked_key_ids = set()
         app.Config.signature_max_age = 300
@@ -119,8 +120,8 @@ class TelemetryGatewayTest(unittest.TestCase):
         path,
         payload=None,
         nonce="nonce-test",
-        key_id="gerrit-pipeline-v2.0.3",
-        secret="test-secret",
+        key_id="gerrit-pipeline-v2.1.0",
+        secret="new-test-secret",
     ):
         raw = b"" if payload is None else json.dumps(payload).encode("utf-8")
         body_hash = hashlib.sha256(raw).hexdigest()
@@ -213,7 +214,7 @@ class TelemetryGatewayTest(unittest.TestCase):
                 "event_id": "evt-columns",
                 "skill": "gerrit-pipeline",
                 "failure_stage": "review",
-                "gateway_key_id": "gerrit-pipeline-v2.0.3",
+                "gateway_key_id": "gerrit-pipeline-v2.1.0",
             })
         finally:
             app.get_bitable_field_types = original_get_fields
@@ -319,7 +320,7 @@ class TelemetryGatewayTest(unittest.TestCase):
         self.assertEqual(status, 202)
         self.assertEqual(body["accepted"], 1)
         self.assertEqual(body["queued"], 1)
-        self.assertEqual(saved_payload["gateway_key_id"], "gerrit-pipeline-v2.0.3")
+        self.assertEqual(saved_payload["gateway_key_id"], "gerrit-pipeline-v2.1.0")
         self.assertEqual(metric_status, 200)
         self.assertEqual(metric_body["counts"], {"pending": 1})
         self.assertEqual(flush_status, 200)
@@ -371,6 +372,41 @@ class TelemetryGatewayTest(unittest.TestCase):
             self.assertEqual(body["accepted"], 1)
             self.assertEqual(saved_payload["gateway_key_id"], key_id)
 
+    def test_2_1_0_hmac_key_is_accepted(self):
+        server = self._start_server()
+        payload = {
+            "event_id": "evt-key-2.1.0",
+            "skill": "gerrit-pipeline",
+            "skill_version": "2.1.0",
+            "success": True,
+            "duration_s": 123.0,
+        }
+
+        status, body = self._json_request(
+            server,
+            "POST",
+            "/telemetry/events",
+            payload,
+            self._signed_headers(
+                "POST",
+                "/telemetry/events",
+                payload,
+                nonce="nonce-key-2.1.0",
+                key_id="gerrit-pipeline-v2.1.0",
+                secret="new-test-secret",
+            ),
+        )
+        with app.db_connect() as conn:
+            row = conn.execute(
+                "SELECT payload FROM telemetry_events WHERE event_id = ?",
+                ("evt-key-2.1.0",),
+            ).fetchone()
+        saved_payload = json.loads(row["payload"])
+
+        self.assertEqual(status, 202)
+        self.assertEqual(body["accepted"], 1)
+        self.assertEqual(saved_payload["gateway_key_id"], "gerrit-pipeline-v2.1.0")
+
     def test_hmac_nonce_replay_is_rejected(self):
         server = self._start_server()
         payload = {
@@ -403,7 +439,7 @@ class TelemetryGatewayTest(unittest.TestCase):
 
     def test_revoked_hmac_key_is_rejected(self):
         server = self._start_server()
-        app.Config.revoked_key_ids = {"gerrit-pipeline-v2.0.3"}
+        app.Config.revoked_key_ids = {"gerrit-pipeline-v2.1.0"}
         payload = {
             "event_id": "evt-revoked",
             "skill": "gerrit-pipeline",

@@ -1,7 +1,7 @@
 {
   "name": "gerrit-pipeline",
-  "version": "2.0.3",
-  "description": "Gerrit Pipeline 是面向 AutoLink Gerrit 代码提交流程的一键评审流水线 skill，串联代码提交、自动代码评审、Checklist 贴回和飞书通知，支持新建提交、amend、cherry-pick、多仓 topic 关联提交、项目差异化配置、执行遥测和 Agent Neutral 运行方式。适用于 Her、Cursor、Claude Code、Codex 及其他具备 shell/Python 执行能力的 agent，用于统一 commit message、Code Review、Checklist 与飞书通知闭环。",
+  "version": "2.1.0",
+  "description": "Gerrit Pipeline 是面向 AutoLink Gerrit 代码提交流程的一键评审流水线 skill，串联代码提交、自动代码评审、Checklist 贴回、飞书通知和 Meego 同步，支持新建提交、amend、cherry-pick、多仓 topic 关联提交、项目差异化配置、执行遥测和 Agent Neutral 运行方式。适用于 Her、Cursor、Claude Code、Codex 及其他具备 shell/Python 执行能力的 agent，用于统一 commit message、Code Review、Checklist、飞书通知与 Meego 工作项闭环。",
   "author": "Hualei",
   "maintainer": "Hualei",
   "platform": [
@@ -17,6 +17,7 @@
     "topic",
     "commit-message",
     "telemetry",
+    "meego",
     "codex",
     "agent-neutral",
     "cursor",
@@ -59,7 +60,7 @@
   "eval_cases": [
     {
       "input": "gerrit pipeline",
-      "expected_output": "按 Step 1 → Step 2 → Step 3 → Step 4 执行完整流水线，并在必要节点向用户确认提交模式、JIRA-ID、commit message 和合并确认。"
+      "expected_output": "按 Step 1 → Step 2 → Step 3 → Step 4 → Step 5 执行完整流水线，并在必要节点向用户确认提交模式、Meego 工作项 URL、commit message 和合并确认。"
     },
     {
       "input": "pipeline submit 当前仓库",
@@ -71,10 +72,13 @@
     },
     {
       "input": "pipeline notify",
-      "expected_output": "收集 CR 编号、评审结果和 Checklist 状态，调用 feishu_notify.py 发送飞书 interactive card。"
+      "expected_output": "收集 CR 编号、评审结果和 Checklist 状态，调用 feishu_notify.py 发送带 Meego 工作项入口的飞书 interactive card。"
     }
   ],
   "changelog": [
+    "v2.1.0: 用户提供 Meego 工作项 URL，commit message body 首行写入完整 Meego URL 便于 Gerrit 页面点击跳转；Step 4 飞书卡片展示可点击工作项入口；Step 5 使用内置 Meego OpenAPI plugin 凭证和管理员 user_key 将 CR 结果回写到工作项评论；telemetry 默认 key 轮换到 gerrit-pipeline-v2.1.0，Gateway 保留 2.0.x 兼容 key。",
+    "v2.0.5: 新增 Step 5 Meego 同步，通过 meego_client.py 将 CR 结果回写到对应 Meego 工作项评论；飞书通知卡片展示 Meego 工作项入口；评审结论、Checklist 和 Meego 评论统一追加 Powered by gerrit-pipeline v<skill.json version>。",
+    "v2.0.4: 提交规范从 JIRA-ID 切换为 Meego 工单 ID/工作项 ID；旧 Jira Key 形态全面弃用；因 Meego ID 格式暂未统一，commit_msg_guard.py 仅校验工作项字段存在并使用中文方括号包裹。",
     "v2.0.3: 新增 commit_msg_guard.py 与 base_branch_guard.py，在 push 前强制校验 commit message、清理 Cursor 等运行时 trailer，并确认 HEAD 基于最新 autolink/<目标分支>；同步轮换 telemetry HMAC key 到 gerrit-pipeline-v2.0.3、收紧 Gateway 鉴权边界，并保留全部 v2.0.x 客户端兼容。",
     "v2.0.2: 补强独立操作 telemetry 收尾规范，明确 submit/review/checklist/notify 单步执行也必须上报 single_step 事件，并避免完整流水线重复套用单步模板。",
     "v2.0.1: 补强遥测字段口径，新增入口、步骤顺序、全流程标识、运行时来源、run_id 与秒级耗时字段，Gateway 同步支持旧毫秒字段兼容转换。",

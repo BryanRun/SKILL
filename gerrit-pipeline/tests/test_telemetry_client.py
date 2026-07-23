@@ -115,7 +115,7 @@ class TelemetryClientTest(unittest.TestCase):
         self.assertEqual(event["event_id"], "evt-test")
         self.assertEqual(event["schema_version"], "1.1")
         self.assertEqual(event["skill"], "gerrit-pipeline")
-        self.assertEqual(event["skill_version"], "2.0.3")
+        self.assertEqual(event["skill_version"], "2.1.0")
         self.assertEqual(event["success"], True)
         self.assertEqual(event["duration_s"], 123.0)
         self.assertEqual(event["repo_count"], 2)
@@ -131,20 +131,21 @@ class TelemetryClientTest(unittest.TestCase):
             self._args(
                 mode="unknown",
                 entry_mode="submit",
-                steps="submit,review,checklist,notify",
-                step_durations="submit=10000,review=20000,checklist=30000,notify=40000",
+                steps="submit,review,checklist,notify,meego_sync",
+                step_durations="submit=10000,review=20000,checklist=30000,notify=40000,meego_sync=50000",
             ),
             {},
         )
 
         self.assertEqual(event["mode"], "full_pipeline")
         self.assertEqual(event["entry_mode"], "submit")
-        self.assertEqual(event["steps"], "submit,review,checklist,notify")
+        self.assertEqual(event["steps"], "submit,review,checklist,notify,meego_sync")
         self.assertTrue(event["is_full_pipeline"])
         self.assertEqual(event["submit_duration_s"], 10.0)
         self.assertEqual(event["review_duration_s"], 20.0)
         self.assertEqual(event["checklist_duration_s"], 30.0)
         self.assertEqual(event["notify_duration_s"], 40.0)
+        self.assertEqual(event["meego_sync_duration_s"], 50.0)
         self.assertIn('"name": "submit"', event["step_trace"])
         self.assertIn('"duration_s": 10.0', event["step_trace"])
 
@@ -255,7 +256,7 @@ class TelemetryClientTest(unittest.TestCase):
         self.assertFalse(user_config.exists())
         self.assertTrue(settings["enabled"])
         self.assertEqual(settings["url"], "http://10.70.55.96:18080")
-        self.assertEqual(settings["key_id"], "gerrit-pipeline-v2.0.3")
+        self.assertEqual(settings["key_id"], "gerrit-pipeline-v2.1.0")
         self.assertEqual(settings["timeout"], 2.0)
         self.assertTrue(settings["hmac_secret"])
 
@@ -308,7 +309,7 @@ class TelemetryClientTest(unittest.TestCase):
                 {
                     "enabled": True,
                     "url": "http://example",
-                    "key_id": "gerrit-pipeline-v2.0.3",
+                    "key_id": "gerrit-pipeline-v2.1.0",
                     "hmac_secret": "secret",
                     "timeout": 1,
                 }
@@ -353,7 +354,7 @@ class TelemetryClientTest(unittest.TestCase):
         self.addCleanup(server.shutdown)
         url = f"http://127.0.0.1:{server.server_address[1]}"
         os.environ["GERRIT_PIPELINE_TELEMETRY_URL"] = url
-        os.environ["GERRIT_PIPELINE_TELEMETRY_KEY_ID"] = "gerrit-pipeline-v2.0.3"
+        os.environ["GERRIT_PIPELINE_TELEMETRY_KEY_ID"] = "gerrit-pipeline-v2.1.0"
         os.environ["GERRIT_PIPELINE_TELEMETRY_HMAC_SECRET"] = "secret"
         os.environ["GERRIT_PIPELINE_TELEMETRY_INSTALL_ID"] = "install-2"
 
@@ -362,7 +363,7 @@ class TelemetryClientTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(CaptureHandler.captured["path"], "/telemetry/events")
         self.assertIsNone(CaptureHandler.captured["auth"])
-        self.assertEqual(CaptureHandler.captured["key_id"], "gerrit-pipeline-v2.0.3")
+        self.assertEqual(CaptureHandler.captured["key_id"], "gerrit-pipeline-v2.1.0")
         self.assertTrue(CaptureHandler.captured["timestamp"])
         self.assertTrue(CaptureHandler.captured["nonce"])
         self.assertEqual(len(CaptureHandler.captured["body_hash"]), 64)

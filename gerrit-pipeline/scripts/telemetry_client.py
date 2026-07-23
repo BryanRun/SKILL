@@ -36,12 +36,13 @@ FLUSH_BATCH_SIZE = 50
 MAX_QUEUE_AGE_SECONDS = 14 * 24 * 60 * 60
 MAX_RUN_CONTEXT_AGE_SECONDS = 14 * 24 * 60 * 60
 PERMANENT_HTTP_STATUS = {400, 401, 403, 413}
-FULL_PIPELINE_STEPS = ["submit", "review", "checklist", "notify"]
+FULL_PIPELINE_STEPS = ["submit", "review", "checklist", "notify", "meego_sync"]
 STEP_DURATION_KEYS = {
     "submit": "submit_duration_s",
     "review": "review_duration_s",
     "checklist": "checklist_duration_s",
     "notify": "notify_duration_s",
+    "meego_sync": "meego_sync_duration_s",
 }
 AGENT_ALIASES = {
     "claude": "claude-code",
@@ -61,7 +62,7 @@ AGENT_ALIASES = {
 DEFAULT_TELEMETRY = {
     "enabled": True,
     "url": "http://10.70.55.96:18080",
-    "key_id": "gerrit-pipeline-v2.0.3",
+    "key_id": "gerrit-pipeline-v2.1.0",
     "timeout_seconds": 2,
 }
 
@@ -1082,7 +1083,7 @@ def build_parser():
     parser.add_argument("--step-durations", default="", help="legacy step durations, JSON object or k=v comma list in milliseconds")
     parser.add_argument("--repo-count", default=0, type=int, help="number of affected repositories")
     parser.add_argument("--error-code", default="", help="stable error code when success=false")
-    parser.add_argument("--failure-stage", default="", help="failed pipeline stage, such as submit/review/checklist/notify")
+    parser.add_argument("--failure-stage", default="", help="failed pipeline stage, such as submit/review/checklist/notify/meego_sync")
     parser.add_argument("--agent", default="", help="agent runtime name")
     parser.add_argument("--submitter-name", default="", help="submitter display name")
     parser.add_argument("--event-id", default="", help="optional idempotency key")
